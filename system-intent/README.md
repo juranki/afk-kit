@@ -15,7 +15,8 @@ the human merge gate. It includes the journeys that pressure those: preparing ti
 delegating an issue, failing loudly, and landing a change.
 
 It excludes the internal design of any agent runtime or subagent mechanism (selection
-is a pending decision; see open questions), the implementation of the toolkit itself,
+recorded in [ADR 0007](../docs/adr/0007-vendored-subagent-mechanism.md)), the
+implementation of the toolkit itself,
 the product domain of any target repository, CI system design, cost accounting beyond
 the policy of bounded loops, and multi-maintainer governance.
 
@@ -50,12 +51,6 @@ constrain those journeys.
 
 ## Open questions
 
-- **Subagent mechanism.** Requirements are recorded in
-  [docs/requirements/subagent-mechanism.md](../docs/requirements/subagent-mechanism.md),
-  but selecting among existing extensions (pi's example `subagent` extension is one
-  candidate) is deferred to a dedicated investigation session. Affects the mechanics of
-  [Delegating an Issue](stories/delegating-an-issue-to-a-coordinator.md) and the
-  [coordinator playbook](../docs/playbooks/coordinator-session.md).
 - **Implementer promotion.** Implementers start on `glm-5.3-flash`; promoting them to
   `glm-5.3` on demonstrated struggle is anticipated but the rules are deferred until
   evidence exists (see [ADR 0004](../docs/adr/0004-flash-first-model-routing.md)).
@@ -68,9 +63,6 @@ constrain those journeys.
   [ADR 0008](../docs/adr/0008-system-intent-shape-as-domain-doc-convention.md)). The
   session mechanics — who writes the update, and when — remain open. Affects the
   [planning playbook](../docs/playbooks/planning-session.md).
-- **Coordinator session location.** Whether a coordinator session runs from the primary
-  checkout or the issue worktree is an implementation choice deferred with the
-  mechanism.
 - **Brief conformance in review.** Whether the reviewer should explicitly check the
   diff's touched areas against the brief's declared areas, rather than leaving that to
   the human, is unresolved. Affects the
