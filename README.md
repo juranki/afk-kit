@@ -9,6 +9,6 @@ The subagent mechanism is deliberately unresolved — its requirements are recor
 [docs/requirements/subagent-mechanism.md](docs/requirements/subagent-mechanism.md),
 and selecting among existing extensions is a separate investigation session.
 
-This is a local-only repository; it has no remote.
+Hosted privately at [github.com/juranki/afk-kit](https://github.com/juranki/afk-kit).
 
 Start with [CONTEXT.md](CONTEXT.md).
