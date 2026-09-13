@@ -60,7 +60,14 @@ coordinator's (R7).
   (pi 0.85.1, MIT at selection time) and re-evaluates the third-party packages if that
   maintenance outweighs adoption.
 - **Coordinator session location** (retired open question): coordinator sessions run
-  in the issue's worktree, consistent with [ADR 0001](0001-per-issue-coordinators.md)'s
-  directory-keyed session history. The mechanism's `cwd` parameter — not the session's
-  working directory — pins each subagent to the worktree root, which is why the
-  location choice no longer constrains the mechanism.
+  in the **primary checkout**, for the whole session. The worktree cannot be the
+  session's home: it does not exist when the session starts — claim + worktree + branch
+  is one atomic operation the coordinator performs mid-session (R7) — and pi sessions
+  are keyed to the working directory at startup with no supported way to re-key
+  mid-session. The mechanism's `cwd` parameter pins each subagent to the worktree root,
+  and the coordinator's deterministic operations take the worktree path as an explicit
+  argument (`git -C <worktree> …`), so nothing depends on where the session sits.
+  Consequence for [ADR 0001](0001-per-issue-coordinators.md): its decision stands, but
+  its directory-keying rationale does not carry over — per-issue history is one named
+  session file per run (`pi.setSessionName("issue-<n>")`), and `/resume` at the primary
+  checkout mixes coordinators across issues, mitigated by those names.
