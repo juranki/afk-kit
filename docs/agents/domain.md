@@ -7,7 +7,7 @@ exploring the codebase.
 
 Domain meaning lives in the **system-intent model**, not in a root `CONTEXT.md` or
 `CONTEXT-MAP.md`. Do not look for them; do not create them. The ontology under
-`system-intent/ontologies/` is the glossary's home.
+`system-intent/ontologies/` is the vocabulary's home.
 
 ## Before exploring, read these
 
@@ -36,7 +36,7 @@ When your output names a domain concept (in an issue title, a refactor proposal,
 hypothesis, a test name), use the term as defined in the ontology. Don't drift to
 synonyms the ontology explicitly avoids.
 
-If the concept you need isn't in the glossary yet, that's a signal: either you're
+If the concept you need isn't in the ontology yet, that's a signal: either you're
 inventing language the project doesn't use (reconsider) or there's a real gap (note it
 for `domain-ontologies`).
 
