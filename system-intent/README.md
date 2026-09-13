@@ -62,8 +62,11 @@ constrain those journeys.
 - **Pre-push review.** The reviewer examines the pushed pull-request diff; whether an
   additional pre-push round adds value is unresolved. Affects
   [review and escalation conventions](../docs/conventions/review-and-escalation.md).
-- **Persistence of grill outcomes.** How decisions from a planning session that exceed
-  the ticket brief persist (issue comments, target-repo docs) is unresolved. Affects the
+- **Persistence of grill outcomes.** Decisions from a planning session that exceed the
+  ticket brief persist as ontology or frame updates, or as ADRs, in the target repo —
+  never as a `CONTEXT.md` glossary (see
+  [ADR 0008](../docs/adr/0008-system-intent-shape-as-domain-doc-convention.md)). The
+  session mechanics — who writes the update, and when — remain open. Affects the
   [planning playbook](../docs/playbooks/planning-session.md).
 - **Coordinator session location.** Whether a coordinator session runs from the primary
   checkout or the issue worktree is an implementation choice deferred with the
