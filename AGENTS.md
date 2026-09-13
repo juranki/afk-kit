@@ -26,7 +26,7 @@ Do not silently resolve a material conflict. Ask, or record the decision as an A
   Changing an invariant is an ontology change; make it there, not in prose.
 - **`system-intent-modeling`** — when changing the model frame, characters, or stories.
 - **`domain-ontologies`** — when changing domain language or invariants.
-- **`domain-modeling`** — when recording an ADR or editing `CONTEXT.md`.
+- **`domain-modeling`** — when recording an ADR.
 - **`writing-for-agents`** — when editing this file, or authoring the skills this
   design describes.
 
@@ -36,3 +36,19 @@ The canonical remote is `github.com/juranki/afk-kit` (private). Until afk-kit's 
 tooling exists, documentation changes commit directly to `main`; once it exists, this
 repository should dogfood the branch-per-issue and review-before-merge discipline it
 prescribes.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues in this repo, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles use their default label strings. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain docs live in `system-intent/` (model frame, ontology, characters, stories);
+there is no root `CONTEXT.md`. See `docs/agents/domain.md`.
