@@ -9,7 +9,11 @@ The subagent mechanism is deliberately unresolved — its requirements are recor
 [docs/requirements/subagent-mechanism.md](docs/requirements/subagent-mechanism.md),
 and selecting among existing extensions is a separate investigation session.
 
-Hosted privately at [github.com/juranki/afk-kit](https://github.com/juranki/afk-kit).
+Hosted at [github.com/juranki/afk-kit](https://github.com/juranki/afk-kit).
 
 Start with [system-intent/README.md](system-intent/README.md), the model frame;
 [docs/README.md](docs/README.md) routes everything else.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

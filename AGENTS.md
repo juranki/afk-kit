@@ -32,7 +32,7 @@ Do not silently resolve a material conflict. Ask, or record the decision as an A
 
 ## Git
 
-The canonical remote is `github.com/juranki/afk-kit` (private). Until afk-kit's own
+The canonical remote is `github.com/juranki/afk-kit`. Until afk-kit's own
 tooling exists, documentation changes commit directly to `main`; once it exists, this
 repository should dogfood the branch-per-issue and review-before-merge discipline it
 prescribes.

@@ -38,6 +38,8 @@ constrain those journeys.
 
 ### Characters
 
+All characters are fictional composites; none corresponds to a real person.
+
 - [Salla — The Context-Protecting Maintainer](characters/salla.md) — Exposes the cost of incomplete briefs and of becoming a bottleneck inside the loop.
 - [Eero — The Skeptical Merger](characters/eero.md) — Exposes why an agent's approval can filter but never replace human review.
 - [Riitta — The Cost-Wary Operator](characters/riitta.md) — Exposes the need for caps, confinement, and loud failure in unattended work.
