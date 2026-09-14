@@ -14,3 +14,4 @@ made and *why*.
 | [ADR 0006: Extensions for mechanics, skills for judgment](0006-extensions-for-mechanics-skills-for-judgment.md) | Accepted | Implementation split for the future toolkit |
 | [ADR 0007: Vendored subagent mechanism](0007-vendored-subagent-mechanism.md) | Accepted | Delegation substrate, implementer confinement, timeouts |
 | [ADR 0008: System-intent shape as the domain-doc convention](0008-system-intent-shape-as-domain-doc-convention.md) | Accepted | Where domain docs live for the wrapped skills |
+| [ADR 0009: Cede "Frontier" to wayfinder](0009-cede-frontier-to-wayfinder.md) | Accepted | Ontology term rename, seam vocabulary |

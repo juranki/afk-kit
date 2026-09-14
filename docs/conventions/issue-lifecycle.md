@@ -36,8 +36,8 @@ in-progress | in-review ──escalation──▶ needs-info | ready-for-agent
 
 - The claim is atomic: **assign the issue to the maintainer account and apply
   `in-progress` together**. An issue with an assignee and `in-progress` is claimed and
-  is not on the frontier.
-- Only a coordinator claims, and only from `ready-for-agent`, and only on a
+  is no longer claimable.
+- Only a coordinator claims, and only from the claimable, and only on a
   maintainer's command.
 
 ## Who may move what

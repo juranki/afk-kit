@@ -14,7 +14,7 @@ Apply it in the target repository's tracker so the brief travels with the issue.
 | **Summary** | One or two sentences in the target repo's domain vocabulary. A stranger could say what changes. |
 | **Acceptance criteria** | Behavior-level and verifiable. Each criterion is independently checkable and becomes a PR checklist item. |
 | **Verify commands** | The exact commands (build, test, lint) whose passing defines done. The implementer runs these; the maintainer can rerun them. |
-| **Blocked by / blocks** | Every edge to other tickets. Missing edges make the frontier lie. |
+| **Blocked by / blocks** | Every edge to other tickets. Missing edges make the claimable lie. |
 | **Touched areas** | Files, directories, and the relevant ontologies, ADRs, or stories the change may touch. Declares the blast radius the reviewer checks against. |
 | **Out of scope** | What this ticket deliberately does not do. Keeps implementers from gold-plating past the chosen edge. |
 | **Open questions** | Must be **empty**. If anything is unresolved, the ticket is not ready for an agent: keep it in `needs-info` (maintainer decides) or `ready-for-human` (human implements). |

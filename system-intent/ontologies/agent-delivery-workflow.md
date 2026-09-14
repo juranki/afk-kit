@@ -30,7 +30,7 @@ the tension between delegating labor and keeping accountability human.
 | Agent brief | The structured part of a ticket that makes it ready for an unattended agent: summary, acceptance criteria, verify commands, blocking edges, touched areas, out-of-scope, and no open questions. |
 | Ready-for-agent | The triage state of a ticket whose brief is complete and whose blockers are known. |
 | Blocker | An open ticket that must complete before another can start. |
-| Frontier | The ready-for-agent tickets that have no open blockers and no active claim. |
+| Claimable | The ready-for-agent tickets that have no open blockers and no active claim. |
 | Coordinator | A per-issue working session that carries one claimed ticket from claim to pull request on the maintainer's explicit command. |
 | Claim | Assigning a ticket to a coordinator and marking it in progress, so no other coordinator takes it. |
 | Worktree | A check-out of the repository in its own directory and branch, holding one ticket's work. |
@@ -68,7 +68,7 @@ erDiagram
 ## Invariants
 
 - A ticket carries the ready-for-agent state only while its brief is complete and names no open questions.
-- A ticket in the frontier has no open blockers and no active claim.
+- A ticket is claimable only while it has no open blockers and no active claim.
 - A claimed ticket is never claimed by two coordinators at once.
 - A coordinator works on at most one ticket at a time.
 - A coordinator begins work on a ticket only at a maintainer's command.
@@ -86,13 +86,16 @@ erDiagram
 
 - No other ontologies exist in this repository yet. The triage-state vocabulary aligns
   with the triage roles of Matt Pocock's engineering skills (see Sources).
+- Wayfinder's **Frontier query** (`docs/agents/issue-tracker.md`, wrapped verbatim per
+  ADR 0003) overlaps in subject matter but is a distinct, map-scoped concept that
+  reuses the word; it is not this ontology's term (see ADR 0009).
 
 ## Open questions
 
 - Whether a Claim implies a tracker-visible assignee or is purely conceptual depends on
   the mechanism selection (see the model frame's open questions).
-- Whether the Frontier must be queryable directly on the tracker (a saved search) or is
-  computed by coordinators on demand is an implementation choice deferred with the
+- Whether the claimable must be queryable directly on the tracker (a saved search) or
+  is computed by coordinators on demand is an implementation choice deferred with the
   mechanism.
 
 ## Sources
@@ -104,5 +107,7 @@ erDiagram
   tracer-bullet slicing, and the AFK-agent concept.
 - pi coding agent `subagent` example extension — the Subagent and Implementer/Reviewer
   delegation concepts.
+- afk-kit issue #4 and ADR 0009 — renamed Frontier to Claimable and ceded the word to
+  wayfinder's frontier query.
 - The workflow-state labels (`in-progress`, `in-review`) and the claim semantics are
   inferred from the maintainer's stated practice; flagged for review.

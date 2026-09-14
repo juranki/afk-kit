@@ -15,7 +15,7 @@ to slip out the door wearing a label it has not earned.
 
 1. **As Salla, a context-protecting maintainer, I want the grill's decisions distilled into each ticket's brief so that agents inherit reasoning rather than bare tasks.**
 
-2. **As Salla, I want blocking edges declared between tickets so that the frontier is an honest statement of what can start now.**
+2. **As Salla, I want blocking edges declared between tickets so that the claimable is an honest statement of what can start now.**
 
 3. **As Salla, I want open questions to hold a ticket short of ready-for-agent so that I never delegate ambiguity.**
 
@@ -31,7 +31,7 @@ to slip out the door wearing a label it has not earned.
 
 ## Ontology touchpoints
 
-- [`Agent Delivery Workflow`](../ontologies/agent-delivery-workflow.md) — Planning session, Agent brief, Ready-for-agent, Blocker, Frontier, Triage state.
+- [`Agent Delivery Workflow`](../ontologies/agent-delivery-workflow.md) — Planning session, Agent brief, Ready-for-agent, Blocker, Claimable, Triage state.
 
 ## Open questions
 

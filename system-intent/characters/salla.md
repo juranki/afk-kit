@@ -39,7 +39,7 @@ re-enter the code mid-flight.
 
 ## Related ontologies
 
-- [Agent Delivery Workflow](../ontologies/agent-delivery-workflow.md) — Maintainer, Agent brief, Ready-for-agent, Coordinator, Merge gate, Frontier.
+- [Agent Delivery Workflow](../ontologies/agent-delivery-workflow.md) — Maintainer, Agent brief, Ready-for-agent, Coordinator, Merge gate, Claimable.
 
 ## Open questions
 

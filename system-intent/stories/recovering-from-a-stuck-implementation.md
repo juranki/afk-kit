@@ -18,7 +18,7 @@ and decides the brief under-specified a migration edge: the ticket moves to
 
 2. **As Salla, a context-protecting maintainer, I want an escalation to tell me what was tried, what broke, and where the worktree is, so that I can decide without re-deriving the situation.**
 
-3. **As Salla, I want the ticket's state to name its truth after escalation so that the frontier stays honest.**
+3. **As Salla, I want the ticket's state to name its truth after escalation so that the claimable stays honest.**
 
 4. **As Salla, I want the abandoned worktree preserved so that partial work is inspectable rather than discarded.**
 
@@ -29,7 +29,7 @@ and decides the brief under-specified a migration edge: the ticket moves to
 
 ## Ontology touchpoints
 
-- [`Agent Delivery Workflow`](../ontologies/agent-delivery-workflow.md) — Escalation, Verify commands, Triage state, Coordinator, Frontier.
+- [`Agent Delivery Workflow`](../ontologies/agent-delivery-workflow.md) — Escalation, Verify commands, Triage state, Coordinator, Claimable.
 
 ## Open questions
 
