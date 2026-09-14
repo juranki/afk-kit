@@ -1,0 +1,19 @@
+{
+	"name": "afk-kit",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "AFK delivery toolkit for pi: coordinator mechanics, the vendored subagent mechanism, and workflow skills",
+	"keywords": ["pi-package"],
+	"pi": {
+		"extensions": ["./extensions/subagent/index.ts"],
+		"prompts": ["./extensions/subagent/prompts"]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-agent-core": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	}
+}
