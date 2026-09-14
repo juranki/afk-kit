@@ -47,10 +47,20 @@ coordinator's (R7).
   GitHub credentials — and a PATH shim that refuses `gh` and `git push` while allowing
   `git commit`; the frontmatter tools allowlist passes through the existing `--tools`
   argv. Exact shim mechanics are an implementation decision.
-- **R8 (timeout/cancel).** Adopt the wait/check pattern proven by the
-  `pi-subagent-tool` fork (MIT): a per-task wait cap returns
+- **R8 (timeout/cancel).** Adopt the wait/check pattern from the
+  `pi-subagent-tool` fork (MIT): a per-call wait cap returns
   `{status: "running", subagentId}` so the coordinator stays in control, with a
-  status file, a hang watchdog, and a cancel (kill by id) the fork adds.
+  per-task status file and a hang watchdog. *Amended 2026-09-14 after reading the
+  fork's source ([research](../research/pi-subagent-wait-check.md)):* the fork
+  proves the wait cap, the status file, and a hang watchdog that covers only its
+  foreground/chain path. It has **no cancel (kill by id)**; its wait cap bounds the
+  coordinator's call, not the child's lifetime; and the detached background tasks
+  wait/check creates are never watched. Cancel, any task wall-clock cap, and
+  background-path watchdog coverage are afk-kit's own work, built on the fork's
+  seams (detached process group, `SIGKILL` → `killed` status mapping), and the
+  vendored port must add the child-pid record any kill-by-id needs. The original
+  text credited "a cancel (kill by id)" to the fork — that was design intent, not
+  provenance.
 - **R2 (per-agent thinking).** Add a `thinking` frontmatter field (the example only
   has dispatch-level thinking); `model` already satisfies [ADR 0004](0004-flash-first-model-routing.md).
 - **R6 (verdict).** No candidate has a verdict primitive; the reviewer agent
