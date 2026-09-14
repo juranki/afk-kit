@@ -5,9 +5,10 @@ planning sessions, and let per-issue agent coordinators implement and review the
 while the human keeps the start and merge gates.
 
 **Status: design only.** No skills or extensions are implemented in this repository.
-The subagent mechanism is deliberately unresolved — its requirements are recorded in
-[docs/requirements/subagent-mechanism.md](docs/requirements/subagent-mechanism.md),
-and selecting among existing extensions is a separate investigation session.
+The subagent mechanism is selected: a vendored, hardened fork of pi's example
+`subagent` extension ([ADR 0007](docs/adr/0007-vendored-subagent-mechanism.md)),
+evaluated against the requirements in
+[docs/requirements/subagent-mechanism.md](docs/requirements/subagent-mechanism.md).
 
 Start with [system-intent/README.md](system-intent/README.md), the model frame;
 [docs/README.md](docs/README.md) routes everything else.

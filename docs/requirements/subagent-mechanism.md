@@ -1,5 +1,9 @@
 # Subagent mechanism — requirements
 
+**Status: resolved** — the selection session recorded
+[ADR 0007](../adr/0007-vendored-subagent-mechanism.md). This document is retained as
+the R1–R10 baseline that decision was evaluated against.
+
 Input for a dedicated investigation session that selects the subagent mechanism for
 afk-kit coordinators. Candidates include pi's example `subagent`
 extension (shipped under pi's `examples/extensions/subagent/`) and any other existing
@@ -7,8 +11,8 @@ extensions; the investigation
 session evaluates candidates against every requirement below and records the choice as
 a new ADR. Gaps in a chosen candidate must be listed explicitly, not absorbed silently.
 
-These requirements were settled in the origin grilling session; the mechanism itself is
-deliberately unresolved.
+These requirements were settled in the origin grilling session; the mechanism itself
+was deliberately left unresolved for the selection session to settle.
 
 ## Requirements
 
