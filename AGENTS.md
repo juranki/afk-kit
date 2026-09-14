@@ -1,8 +1,9 @@
 # Agent Working Agreement
 
-This repository captures the design of a development workflow. It contains no
-implementation: do not create skill, extension, or source files here. Changes to
-this repository are documentation changes.
+This repository holds the design of a development workflow and the toolkit that
+implements it ([ADR 0010](docs/adr/0010-retire-the-design-only-policy.md)): skills,
+extensions, agent definitions, and tests are created here under the same discipline as
+the design docs.
 
 ## Read before writing
 
@@ -32,10 +33,11 @@ Do not silently resolve a material conflict. Ask, or record the decision as an A
 
 ## Git
 
-The canonical remote is `github.com/juranki/afk-kit`. Until afk-kit's own
-tooling exists, documentation changes commit directly to `main`; once it exists, this
-repository should dogfood the branch-per-issue and review-before-merge discipline it
-prescribes.
+The canonical remote is `github.com/juranki/afk-kit`. Until the coordinator loop is
+minimally viable (map issue
+[#5](https://github.com/juranki/afk-kit/issues/5)), changes commit directly to
+`main`; after that, this repository is dogfooded through the branch-per-issue and
+review-before-merge discipline the toolkit itself prescribes.
 
 ## Agent skills
 

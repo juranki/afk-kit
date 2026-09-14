@@ -3,9 +3,10 @@
 This is the entry point for deciding where workflow information belongs and where to
 find its canonical form. Follow links rather than copying claims between artifacts.
 
-Nothing in this repository is implemented yet: playbooks describe how sessions are
-*intended* to run once the skills and extensions exist; today the workflow is run by
-hand, using the installed skills directly.
+Implementation of the toolkit is under way
+([ADR 0010](adr/0010-retire-the-design-only-policy.md)); until it ships, playbooks
+describe how sessions are *intended* to run, and today the workflow is run by hand,
+using the installed skills directly.
 
 ## Find information by task
 
