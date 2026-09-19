@@ -34,8 +34,3 @@ request.
 ## Ontology touchpoints
 
 - [`Agent Delivery Workflow`](../ontologies/agent-delivery-workflow.md) — Coordinator, Claim, Worktree, Implementer, Verify commands, Reviewer, Verdict, Pull request, Merge gate.
-
-## Open questions
-
-- The spawning mechanics, per-subagent working directory, and tool confinement depend
-  on the mechanism selection (see the model frame's open questions).

@@ -110,6 +110,10 @@ are the backstops for adversarial behavior, and the ontology's "never publishes"
 invariant describes the *behavior contract*, enforced to the depth the threat model
 requires — but record the decision explicitly in #17 either way.
 
+**Resolved 2026-09-19 (map review, maintainer-approved): accident-level confinement
+accepted for the toolkit's v1**, per the recommendation above — recorded on
+[#17](https://github.com/juranki/afk-kit/issues/17).
+
 ## Carry-over into #17's implementation
 
 1. Env: allowlist + git-pin exports, built in the fork at the spawn seam

@@ -69,6 +69,11 @@ All characters are fictional composites; none corresponds to a real person.
   diff's touched areas against the brief's declared areas, rather than leaving that to
   the human, is unresolved. Affects the
   [merge-gate story](stories/landing-a-change-under-the-merge-gate.md).
+- **Worktree reuse after escalation.** Whether a later coordinator may reuse an
+  escalated ticket's worktree and branch, or always starts fresh, is unresolved.
+  Affects the
+  [recovering-from-stuck story](stories/recovering-from-a-stuck-implementation.md)
+  and [review and escalation conventions](../docs/conventions/review-and-escalation.md).
 
 ## Sources
 

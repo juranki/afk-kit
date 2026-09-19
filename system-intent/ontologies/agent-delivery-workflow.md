@@ -93,14 +93,6 @@ erDiagram
   ADR 0003) overlaps in subject matter but is a distinct, map-scoped concept that
   reuses the word; it is not this ontology's term (see ADR 0009).
 
-## Open questions
-
-- Whether a Claim implies a tracker-visible assignee or is purely conceptual depends on
-  the mechanism selection (see the model frame's open questions).
-- Whether the claimable must be queryable directly on the tracker (a saved search) or
-  is computed by coordinators on demand is an implementation choice deferred with the
-  mechanism.
-
 ## Sources
 
 - Grilling interview with the maintainer, origin session of this repository (2026-09);
@@ -116,3 +108,8 @@ erDiagram
   inferred from the maintainer's stated practice; flagged for review.
 - afk-kit issue #14 and ADR 0012 — the readiness check as the form of brief
   enforcement (2026-09).
+- Retired from Open questions (2026-09, after the mechanism selection, ADR 0007):
+  a Claim is tracker-visible — assignment plus `in-progress`, per the issue-lifecycle
+  convention's claim semantics — and the Claimable is computed on demand by a
+  coordinator's frontier query, not a saved search
+  (`docs/agents/issue-tracker.md`).
