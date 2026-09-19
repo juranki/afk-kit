@@ -19,10 +19,15 @@ it never picks work on its own:
 
 For `implement #<n>`:
 
-1. **Check readiness** — the issue carries `ready-for-agent`, has a complete brief, and
-   no open blockers. Refuse and report if not.
+1. **Check readiness** — run the readiness check (the afk-kit extension tool;
+   [ADR 0012](../adr/0012-brief-enforcement-readiness-check.md)). Refuse on failure:
+   report with a structured `READINESS_REFUSAL` refusal naming the failed
+   inspections, and leave one comment on the issue recording them. Do not relabel —
+   the label is corrected by the planning session or the maintainer.
 2. **Claim** — assign the issue and apply `in-progress` (the claim, per
-   [issue lifecycle](../conventions/issue-lifecycle.md)).
+   [issue lifecycle](../conventions/issue-lifecycle.md)). The atomic claim re-runs
+   the readiness check and refuses — claiming nothing — if it fails
+   ([ADR 0012](../adr/0012-brief-enforcement-readiness-check.md)).
 3. **Worktree and branch** — create them per
    [branching and PRs](../conventions/branching-and-prs.md).
 4. **Implement** — delegate to an `implementer` subagent (`glm-5.3-flash`) inside the

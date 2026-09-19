@@ -23,7 +23,9 @@ demands:
 A ticket leaves the session as `ready-for-agent` only when:
 
 1. Its brief satisfies every field of the [agent brief template](../brief-template.md),
-   including an **empty** Open questions field.
+   including an **empty** Open questions field — proven by a passing run of the
+   readiness check, the afk-kit extension tool ([ADR 0012](../adr/0012-brief-enforcement-readiness-check.md));
+   only a passing result may apply the label.
 2. Every blocking edge is declared (native tracker dependencies where available, as in
    tenant-kit's `docs/agents/issue-tracker.md`).
 3. Labels follow the target repo's mapping of the triage states.

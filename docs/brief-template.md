@@ -13,7 +13,7 @@ Apply it in the target repository's tracker so the brief travels with the issue.
 | --- | --- |
 | **Summary** | One or two sentences in the target repo's domain vocabulary. A stranger could say what changes. |
 | **Acceptance criteria** | Behavior-level and verifiable. Each criterion is independently checkable and becomes a PR checklist item. |
-| **Verify commands** | The exact commands (build, test, lint) whose passing defines done. The implementer runs these; the maintainer can rerun them. For afk-kit's own tickets the default citation is `bun install && bun run verify` ([code verify standard](conventions/code-verify.md)); the [package verify commands](conventions/package-verify.md) are the reusable precedent for target repos and package work. |
+| **Verify commands** | At least one command — a ticket without one is ready for a human, not an agent. The exact commands (build, test, lint) whose passing defines done. The implementer runs these; the maintainer can rerun them. For afk-kit's own tickets the default citation is `bun install && bun run verify` ([code verify standard](conventions/code-verify.md)); the [package verify commands](conventions/package-verify.md) are the reusable precedent for target repos and package work. |
 | **Blocked by / blocks** | Every edge to other tickets. Missing edges make the claimable lie. |
 | **Touched areas** | Files, directories, and the relevant ontologies, ADRs, or stories the change may touch. Declares the blast radius the reviewer checks against. |
 | **Out of scope** | What this ticket deliberately does not do. Keeps implementers from gold-plating past the chosen edge. |
@@ -48,6 +48,12 @@ Apply it in the target repository's tracker so the brief travels with the issue.
 
 - Satisfying this template is the exit criterion of a planning session's slice (see the
   [planning playbook](playbooks/planning-session.md)) — there is no other gate.
+- The [readiness check](adr/0012-brief-enforcement-readiness-check.md) verifies this
+  template mechanically — fields present, Open questions empty, label consistent,
+  blocked-by edges matching the tracker's native dependencies — before `ready-for-agent`
+  is applied and again at claim ([ADR 0012](adr/0012-brief-enforcement-readiness-check.md)).
+  It is a structural check: whether criteria are truly verifiable stays with the
+  planning session and the reviewer.
 - The reviewer and the maintainer both read the brief against the diff: the checklist
   items come from **Acceptance criteria**, and the surprise test comes from
   **Touched areas** (see the [merge-gate story](../system-intent/stories/landing-a-change-under-the-merge-gate.md)).

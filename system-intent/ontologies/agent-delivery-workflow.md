@@ -29,6 +29,7 @@ the tension between delegating labor and keeping accountability human.
 | Planning session | A human-led working session that triages, questions, and specifies work into tickets. |
 | Agent brief | The structured part of a ticket that makes it ready for an unattended agent: summary, acceptance criteria, verify commands, blocking edges, touched areas, out-of-scope, and no open questions. |
 | Ready-for-agent | The triage state of a ticket whose brief is complete and whose blockers are known. |
+| Readiness check | The check that verifies a ticket's brief against the brief template — every field present, no open questions, blockers declared — before the ticket becomes ready-for-agent and again before it is claimed. |
 | Blocker | An open ticket that must complete before another can start. |
 | Claimable | The ready-for-agent tickets that have no open blockers and no active claim. |
 | Coordinator | A per-issue working session that carries one claimed ticket from claim to pull request on the maintainer's explicit command. |
@@ -68,6 +69,8 @@ erDiagram
 ## Invariants
 
 - A ticket carries the ready-for-agent state only while its brief is complete and names no open questions.
+- A ticket becomes ready-for-agent only after its readiness check passes.
+- A coordinator claims a ticket only after its readiness check passes.
 - A ticket is claimable only while it has no open blockers and no active claim.
 - A claimed ticket is never claimed by two coordinators at once.
 - A coordinator works on at most one ticket at a time.
@@ -111,3 +114,5 @@ erDiagram
   wayfinder's frontier query.
 - The workflow-state labels (`in-progress`, `in-review`) and the claim semantics are
   inferred from the maintainer's stated practice; flagged for review.
+- afk-kit issue #14 and ADR 0012 — the readiness check as the form of brief
+  enforcement (2026-09).
