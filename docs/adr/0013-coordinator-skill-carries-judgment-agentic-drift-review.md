@@ -1,4 +1,4 @@
-# ADR 0012: The coordinator skill carries judgment; an agentic review catches drift
+# ADR 0013: The coordinator skill carries judgment; an agentic review catches drift
 
 - **Status:** Accepted
 - **Date:** 2026-09-19

@@ -17,4 +17,5 @@ made and *why*.
 | [ADR 0009: Cede "Frontier" to wayfinder](0009-cede-frontier-to-wayfinder.md) | Accepted | Ontology term rename, seam vocabulary |
 | [ADR 0010: Retire the design-only policy](0010-retire-the-design-only-policy.md) | Accepted | Repo policy: implementation lives here, git discipline |
 | [ADR 0011: Merge guard is session-bound client-side enforcement](0011-merge-guard-session-bound-client-side-enforcement.md) | Accepted | Merge refusal at the session's tool boundary |
-| [ADR 0012: The coordinator skill carries judgment; an agentic review catches drift](0012-coordinator-skill-carries-judgment-agentic-drift-review.md) | Accepted | Skill/doc split, drift-avoidance mechanism |
+| [ADR 0012: Brief enforcement is a deterministic readiness check](0012-brief-enforcement-readiness-check.md) | Accepted | Readiness check as the form of brief enforcement |
+| [ADR 0013: The coordinator skill carries judgment; an agentic review catches drift](0013-coordinator-skill-carries-judgment-agentic-drift-review.md) | Accepted | Skill/doc split, drift-avoidance mechanism |
