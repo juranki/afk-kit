@@ -52,6 +52,34 @@ Delegate tasks to specialized subagents with isolated context windows.
 >   model.
 > - **POSIX only** — the runner wrapper is bash (upstream spawned the child
 >   directly).
+> - **R5 implementer confinement (#17)** — the production form of the
+>   prototype in [`../../prototype/r5-confinement/`](../../prototype/r5-confinement/).
+>   Confinement is a **per-agent-definition property**: an agent whose
+>   frontmatter carries `confinement:` spawns confined; the shipped
+>   [`implementer`](agents/implementer.md) is the only one. Three independent
+>   layers, composed at the spawn seam (both the detached background path and
+>   the foreground chain path):
+>   1. **Env allowlist + git pin** — the child env is built, not inherited:
+>      `PATH`, `HOME`, `TERM`, `LANG`, `TMPDIR`, the proxy/TLS-root variables,
+>      nothing else (model credentials ride pi's config store under `HOME`, not
+>      env), plus `GIT_CONFIG_GLOBAL` pointing at a pinned per-child gitconfig
+>      (identity in, credential helpers out), `GIT_CONFIG_NOSYSTEM=1`,
+>      `GIT_TERMINAL_PROMPT=0`.
+>   2. **PATH shim** — per-child `gh` stub (refuse all, exit 126) and `git`
+>      wrapper (refuse `push`, exec through to the real binary otherwise),
+>      prepended to the child's PATH. Every refusal prints one stderr line
+>      beginning `CONFINEMENT_REFUSAL`.
+>   3. **Tools allowlist** — unchanged `--tools` argv passthrough.
+>   The material lives in the task dir on the background path (inspectable
+>   evidence alongside the task record) and a cleaned-up temp dir on the
+>   chain path. **Scope: accident-level, decided 2026-09-19** — the shim
+>   stops accidents, not adversaries (the verified bypass chain in
+>   [`../../prototype/r5-confinement/FINDINGS.md`](../../prototype/r5-confinement/FINDINGS.md));
+>   the reviewer and the human merge gate are the backstops.
+>   The child's `CONFINEMENT_REFUSAL` stderr lines surface as a `refusals`
+>   field in the structured result and in the tool text and check output —
+>   report lines, never errors: refusals are normal for a confined
+>   implementer; the coordinator publishes.
 
 ## Features
 
@@ -69,11 +97,14 @@ subagent/
 ├── README.md            # This file
 ├── index.ts             # The extension (entry point)
 ├── agents.ts            # Agent discovery logic
+├── background.ts        # The wait/check background machinery (R8)
+├── confinement.ts       # Implementer confinement: env allowlist, PATH shim, git pin (R5)
 ├── agents/              # Sample agent definitions
 │   ├── scout.md         # Fast recon, returns compressed context
 │   ├── planner.md       # Creates implementation plans
 │   ├── reviewer.md      # Code review
-│   └── worker.md        # General-purpose (full capabilities)
+│   ├── worker.md        # General-purpose (full capabilities)
+│   └── implementer.md   # Ticket implementation, confined (R5)
 └── prompts/             # Workflow presets (prompt templates)
     ├── implement.md     # scout -> planner -> worker
     ├── scout-and-plan.md    # scout -> planner (no implementation)
@@ -183,12 +214,15 @@ name: my-agent
 description: What this agent does
 tools: read, grep, find, ls
 model: claude-haiku-4-5
+confinement: implementer
 ---
 
 System prompt for the agent goes here.
 ```
 
 When `model` is omitted, the subagent inherits the dispatching session's active model and thinking level.
+
+A non-empty `confinement` field spawns the agent confined (R5): env allowlist + pinned gitconfig, and a PATH shim refusing `gh` and `git push`. The value names the confinement profile; one profile ships, so any non-empty value gets it — a typo over-confines rather than under-confines. The agent's `CONFINEMENT_REFUSAL` stderr lines come back as a `refusals` field on the structured result.
 
 **Locations:**
 - `~/.pi/agent/agents/*.md` - User-level (always loaded)
@@ -204,6 +238,7 @@ Project agents override user agents with the same name when `agentScope: "both"`
 | `planner` | Implementation plans | Sonnet | read, grep, find, ls |
 | `reviewer` | Code review | Sonnet | read, grep, find, ls, bash |
 | `worker` | General-purpose | Sonnet | (all default) |
+| `implementer` | Writes and verifies one ticket's change; **confined** — local commits only, no publishing (R5, #17) | glm-5.3-flash (ADR 0004) | read, edit, write, bash, ls, find, grep |
 
 ## Workflow Prompts
 

@@ -19,6 +19,13 @@ export interface AgentConfig {
 	tools?: string[];
 	model?: string;
 	thinking?: ThinkingLevel;
+	/**
+	 * R5 confinement marker (#17). Present ⇒ the agent spawns confined: env
+	 * allowlist + git pin, PATH shim refusing `gh` and `git push`. The value
+	 * names the confinement profile; v1 ships exactly one, so any non-empty
+	 * value gets it — a typo over-confines rather than under-confines.
+	 */
+	confinement?: string;
 	systemPrompt: string;
 	source: "user" | "project";
 	filePath: string;
@@ -43,6 +50,7 @@ type AgentFrontmatter = {
 	tools?: unknown;
 	model?: unknown;
 	thinking?: unknown;
+	confinement?: unknown;
 };
 
 /**
@@ -141,6 +149,11 @@ function loadAgentsFromDir(
 			model:
 				typeof frontmatter.model === "string" ? frontmatter.model : undefined,
 			thinking: parseThinkingLevel(frontmatter.thinking),
+			confinement:
+				typeof frontmatter.confinement === "string" &&
+				frontmatter.confinement.trim()
+					? frontmatter.confinement.trim()
+					: undefined,
 			systemPrompt: body,
 			source,
 			filePath,

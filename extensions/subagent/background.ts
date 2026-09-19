@@ -32,6 +32,11 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { AgentConfig } from "./agents.ts";
+import {
+	buildConfinedEnv,
+	extractRefusals,
+	materializeConfinement,
+} from "./confinement.ts";
 
 // ── Tunables (env-overridable; docs/conventions and the README document them) ──
 // Read lazily on every use, never cached at module load: tests and wrappers
@@ -543,6 +548,16 @@ export function spawnBackgroundTask(input: SpawnBackgroundInput): SpawnedTask {
 		mode: 0o600,
 	});
 
+	// R5 confinement (#17): a confined agent's spawn env is the curated
+	// allowlist + git pin, with the PATH shim prepended. The material lives in
+	// the task dir — per-child, and inspectable evidence of what the child was
+	// confined with, for exactly as long as the task record itself.
+	let spawnEnv: NodeJS.ProcessEnv | undefined;
+	if (agent.confinement) {
+		const material = materializeConfinement(dir);
+		spawnEnv = buildConfinedEnv(process.env, material);
+	}
+
 	const stdoutFd = fs.openSync(stdoutPath, "a");
 	const stderrFd = fs.openSync(stderrPath, "a");
 	let proc: ReturnType<typeof spawn>;
@@ -551,6 +566,7 @@ export function spawnBackgroundTask(input: SpawnBackgroundInput): SpawnedTask {
 			cwd: input.cwd,
 			detached: true,
 			stdio: ["ignore", stdoutFd, stderrFd],
+			env: spawnEnv,
 		});
 	} finally {
 		fs.closeSync(stdoutFd);
@@ -754,6 +770,24 @@ export function readStderrTail(id: string, maxBytes = 2000): string {
 	return tail(path.join(taskDir(id), "stderr.log"), maxBytes);
 }
 
+/**
+ * The confined child's refusal report lines (R5), from its full stderr log
+ * and its work history — not the tail: every refusal is a report line the
+ * coordinator should see. A refused subprocess surfaces through the work
+ * history's tool results; only the child's own stderr lands in stderr.log,
+ * so both streams are scanned and deduplicated.
+ */
+export function readRefusals(id: string): string[] {
+	let stderr = "";
+	try {
+		stderr = fs.readFileSync(path.join(taskDir(id), "stderr.log"), "utf-8");
+	} catch {
+		/* no stderr yet */
+	}
+	const { messages } = readWorkHistory(path.join(taskDir(id), "stdout.jsonl"));
+	return extractRefusals(stderr, messages);
+}
+
 export function checkSubagentText(
 	id: string,
 	historyFull: boolean,
@@ -800,6 +834,12 @@ export function checkSubagentText(
 	}
 	const stderr = tail(path.join(taskDir(id), "stderr.log"), 2000);
 	if (stderr.trim()) lines.push(`Stderr (tail):\n${stderr}`);
+	const refusals = readRefusals(id);
+	if (refusals.length > 0) {
+		// Report lines, not errors: a confined agent's refusals are normal.
+		lines.push(`Refusals (${refusals.length}, confined):`);
+		for (const refusal of refusals) lines.push(`  - ${refusal}`);
+	}
 	lines.push(`Cancel with subagent({ cancel: "${id}" }).`);
 	return { text: lines.join("\n"), record };
 }

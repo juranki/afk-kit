@@ -47,6 +47,7 @@ import {
 	formatElapsedMs,
 	getPiInvocation,
 	pollIntervalMs,
+	readRefusals,
 	readStatus,
 	readStderrTail,
 	readWorkHistory,
@@ -58,6 +59,11 @@ import {
 	terminalFromSignal,
 	waitForSubagent,
 } from "./background.ts";
+import {
+	buildConfinedEnv,
+	extractRefusals,
+	materializeConfinement,
+} from "./confinement.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const COLLAPSED_ITEM_COUNT = 10;
@@ -199,6 +205,11 @@ interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	/**
+	 * R5: the confined child's CONFINEMENT_REFUSAL stderr lines. Report
+	 * lines, not errors — a refusal never flips the result's error state.
+	 */
+	refusals?: string[];
 }
 
 interface SubagentDetails {
@@ -226,6 +237,17 @@ function isFailedResult(result: SingleResult): boolean {
 		result.stopReason === "error" ||
 		result.stopReason === "aborted"
 	);
+}
+
+/**
+ * Append a result's refusals to coordinator-visible text. Refusals are
+ * normal for a confined implementer (FINDINGS.md): reported, never alarmed
+ * on — they never change the text's error framing.
+ */
+function withRefusals(text: string, result: SingleResult): string {
+	if (!result.refusals || result.refusals.length === 0) return text;
+	const lines = result.refusals.map((r) => `- ${r}`).join("\n");
+	return `${text}\n\nRefusals (${result.refusals.length}, confined):\n${lines}`;
 }
 
 function getResultOutput(result: SingleResult): string {
@@ -304,6 +326,7 @@ function resultFromRecord(
 ): SingleResult {
 	const { messages } = readWorkHistory(path.join(taskDir(id), "stdout.jsonl"));
 	const summary = summarizeMessages(messages);
+	const refusals = readRefusals(id);
 	return {
 		agent: record.agent,
 		agentSource: record.agentSource,
@@ -316,6 +339,7 @@ function resultFromRecord(
 		...(summary.stopReason ? { stopReason: summary.stopReason } : {}),
 		errorMessage: record.errorMessage ?? summary.errorMessage,
 		...(record.step !== undefined ? { step: record.step } : {}),
+		...(refusals.length > 0 ? { refusals } : {}),
 	};
 }
 
@@ -359,6 +383,21 @@ async function runSingleAgent(
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
+
+	// R5 confinement (#17) on the foreground chain path: materialize the shim
+	// + git pin into a per-child temp dir, pass the allowlist env to the spawn,
+	// clean up with the prompt temp file.
+	let confinementDir: string | null = null;
+	let spawnEnv: NodeJS.ProcessEnv | undefined;
+	if (agent.confinement) {
+		confinementDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "pi-subagent-confined-"),
+		);
+		spawnEnv = buildConfinedEnv(
+			process.env,
+			materializeConfinement(confinementDir),
+		);
+	}
 
 	const currentResult: SingleResult = {
 		agent: agentName,
@@ -411,6 +450,7 @@ async function runSingleAgent(
 				cwd: cwd ?? defaultCwd,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
+				env: spawnEnv,
 			});
 			let buffer = "";
 
@@ -495,6 +535,11 @@ async function runSingleAgent(
 		});
 
 		currentResult.exitCode = exitCode;
+		const refusals = extractRefusals(
+			currentResult.stderr,
+			currentResult.messages,
+		);
+		if (refusals.length > 0) currentResult.refusals = refusals;
 		if (wasAborted) throw new Error("Subagent was aborted");
 		return currentResult;
 	} finally {
@@ -507,6 +552,12 @@ async function runSingleAgent(
 		if (tmpPromptDir)
 			try {
 				fs.rmdirSync(tmpPromptDir);
+			} catch {
+				/* ignore */
+			}
+		if (confinementDir)
+			try {
+				fs.rmSync(confinementDir, { recursive: true, force: true });
 			} catch {
 				/* ignore */
 			}
@@ -608,6 +659,7 @@ export default function (pi: ExtensionAPI) {
 			'Single and parallel are non-blocking: the call waits up to `wait` seconds (default 180; 0 = return immediately; negative = forever), then returns {status: "running", subagentId}.',
 			'Recover the result later with {check: "<subagentId>"} (history: "full" for the whole stream); kill a stuck task with {cancel: "<subagentId>"}.',
 			"Every task is also bounded on its own: a wall-clock cap and a no-output watchdog kill a hung child.",
+			"Agents whose frontmatter carries a confinement field spawn confined (R5): env allowlist + pinned gitconfig, a PATH shim refusing gh and git push; their CONFINEMENT_REFUSAL stderr lines come back as a refusals field — report lines, not errors.",
 			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
 			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
 		].join(" "),
@@ -921,7 +973,10 @@ export default function (pi: ExtensionAPI) {
 
 				const successCount = results.filter((r) => !isFailedResult(r)).length;
 				const summaries = results.map((r) => {
-					const output = truncateParallelOutput(getResultOutput(r));
+					const output = withRefusals(
+						truncateParallelOutput(getResultOutput(r)),
+						r,
+					);
 					const status = isFailedResult(r)
 						? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
 						: "completed";
@@ -1007,7 +1062,10 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `Agent ${result.stopReason || "failed"}: ${errorMsg}`,
+								text: withRefusals(
+									`Agent ${result.stopReason || "failed"}: ${errorMsg}`,
+									result,
+								),
 							},
 						],
 						details: makeDetails("single")([result]),
@@ -1018,7 +1076,10 @@ export default function (pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: getFinalOutput(result.messages) || "(no output)",
+							text: withRefusals(
+								getFinalOutput(result.messages) || "(no output)",
+								result,
+							),
 						},
 					],
 					details: makeDetails("single")([result]),

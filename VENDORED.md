@@ -20,15 +20,21 @@ lists (R5 confinement, R8 timeout/cancel, R2 per-agent thinking, R6 verdict).
   change them deliberately and must update the manifest to say so.
 
   Fork-modified so far (ticket #16, R8 wait/check + cancel + wall-clock cap +
-  background watchdog, and R2 per-agent thinking — divergence points listed in
+  background watchdog, and R2 per-agent thinking; ticket #17, R5 implementer
+  confinement — divergence points listed in
   [`extensions/subagent/README.md`](extensions/subagent/README.md)):
 
   - `extensions/subagent/index.ts`
   - `extensions/subagent/agents.ts`
   - `extensions/subagent/README.md`
 
-  New afk-kit-owned file: `extensions/subagent/background.ts` (the wait/check
-  machinery), with colocated tests `background.test.ts` / `agents.test.ts`.
+  New afk-kit-owned files: `extensions/subagent/background.ts` (the wait/check
+  machinery) and `extensions/subagent/confinement.ts` (the R5 confinement:
+  env allowlist, PATH shim, git pin), with colocated tests `background.test.ts`,
+  `confinement.test.ts`, and `agents.test.ts`. The shipped roster gained
+  `extensions/subagent/agents/implementer.md` (ticket #17) — an afk-kit file,
+  not an upstream one; the remaining `agents/*.md` and `prompts/*.md` are
+  upstream-byte-identical and sha-tracked below.
 
 ## Files
 

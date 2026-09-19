@@ -18,6 +18,7 @@ import type { AgentConfig } from "./agents.ts";
 import {
 	buildSubagentArgs,
 	cancelGuard,
+	checkSubagentText,
 	computeWaitMs,
 	finalizeScript,
 	finalizeStatus,
@@ -26,6 +27,7 @@ import {
 	isWallClockExpired,
 	killTaskGroup,
 	newSubagentId,
+	readRefusals,
 	readStatus,
 	taskDir,
 	terminalFromSignal,
@@ -306,5 +308,77 @@ describe("argv assembly (R2 per-agent thinking)", () => {
 	test("the tools allowlist passes through the --tools argv", () => {
 		const args = buildSubagentArgs(agent({ tools: ["read", "bash"] }), {});
 		expect(args[args.indexOf("--tools") + 1]).toBe("read,bash");
+	});
+});
+
+describe("refusal surfacing (R5, #17)", () => {
+	test("readRefusals extracts the CONFINEMENT_REFUSAL lines from the task's stderr", () => {
+		const id = newSubagentId();
+		fs.mkdirSync(taskDir(id), { recursive: true });
+		fs.writeFileSync(
+			path.join(taskDir(id), "stderr.log"),
+			"noise\nCONFINEMENT_REFUSAL gh: 'gh api user' — no access (R5).\nmore noise\nCONFINEMENT_REFUSAL git: 'git push' refused.\n",
+		);
+		expect(readRefusals(id)).toEqual([
+			"CONFINEMENT_REFUSAL gh: 'gh api user' — no access (R5).",
+			"CONFINEMENT_REFUSAL git: 'git push' refused.",
+		]);
+	});
+
+	test("a refused subprocess surfaces from the work history, not the child's stderr", () => {
+		// L3 finding (#17): a shim-refused command reaches the child as a bash
+		// tool result; the child process's own stderr stays empty.
+		const id = newSubagentId();
+		fs.mkdirSync(taskDir(id), { recursive: true });
+		const toolResult = {
+			type: "message_end",
+			message: {
+				role: "toolResult",
+				toolCallId: "c1",
+				content: [
+					{
+						type: "text",
+						text: "CONFINEMENT_REFUSAL git: 'git push' is a publish verb (R5).\n\nCommand exited with code 126",
+					},
+				],
+			},
+		};
+		fs.writeFileSync(
+			path.join(taskDir(id), "stdout.jsonl"),
+			`${JSON.stringify(toolResult)}\n`,
+		);
+		expect(readRefusals(id)).toEqual([
+			"CONFINEMENT_REFUSAL git: 'git push' is a publish verb (R5).",
+		]);
+	});
+
+	test("readRefusals is empty without a stderr log", () => {
+		expect(readRefusals(newSubagentId())).toEqual([]);
+	});
+
+	test("the check text reports refusals as report lines, not errors", () => {
+		const id = newSubagentId();
+		fs.mkdirSync(taskDir(id), { recursive: true });
+		fs.writeFileSync(
+			path.join(taskDir(id), "stderr.log"),
+			"CONFINEMENT_REFUSAL git: 'git push' is a publish verb (R5).\n",
+		);
+		const record = initialStatus({
+			subagentId: id,
+			agent: "implementer",
+			agentSource: "user",
+			mode: "single",
+			task: "t",
+			pid: null,
+			pgid: null,
+		});
+		record.status = "done";
+		record.exitCode = 0;
+		writeStatus(record);
+		const { text } = checkSubagentText(id, false);
+		expect(text).toContain("Refusals");
+		expect(text).toContain(
+			"CONFINEMENT_REFUSAL git: 'git push' is a publish verb (R5).",
+		);
 	});
 });
