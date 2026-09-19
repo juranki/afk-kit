@@ -1,0 +1,22 @@
+{
+	// afk-kit's lint + format config. Rules are added only when one bites;
+	// each addition carries a comment saying why.
+	//
+	// Scope boundary: extensions/subagent/ is vendored upstream code and must
+	// stay byte-identical (VENDORED.sha256), so it is excluded here. When the
+	// fork modifies a vendored file (tickets #16–#18), that file is already off
+	// the sha manifest — shrink this exclusion then, file by file.
+	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+	"files": {
+		"includes": ["**", "!extensions/subagent"]
+	},
+	"formatter": {
+		"enabled": true
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended"
+		}
+	}
+}

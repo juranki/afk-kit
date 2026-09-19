@@ -13,7 +13,7 @@ Apply it in the target repository's tracker so the brief travels with the issue.
 | --- | --- |
 | **Summary** | One or two sentences in the target repo's domain vocabulary. A stranger could say what changes. |
 | **Acceptance criteria** | Behavior-level and verifiable. Each criterion is independently checkable and becomes a PR checklist item. |
-| **Verify commands** | The exact commands (build, test, lint) whose passing defines done. The implementer runs these; the maintainer can rerun them. Reusable precedent: the [package verify commands](conventions/package-verify.md). |
+| **Verify commands** | The exact commands (build, test, lint) whose passing defines done. The implementer runs these; the maintainer can rerun them. For afk-kit's own tickets the default citation is `bun install && bun run verify` ([code verify standard](conventions/code-verify.md)); the [package verify commands](conventions/package-verify.md) are the reusable precedent for target repos and package work. |
 | **Blocked by / blocks** | Every edge to other tickets. Missing edges make the claimable lie. |
 | **Touched areas** | Files, directories, and the relevant ontologies, ADRs, or stories the change may touch. Declares the blast radius the reviewer checks against. |
 | **Out of scope** | What this ticket deliberately does not do. Keeps implementers from gold-plating past the chosen edge. |

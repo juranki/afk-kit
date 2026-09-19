@@ -4,10 +4,22 @@
 	"private": true,
 	"type": "module",
 	"description": "AFK delivery toolkit for pi: coordinator mechanics, the vendored subagent mechanism, and workflow skills",
-	"keywords": ["pi-package"],
+	"keywords": [
+		"pi-package"
+	],
+	"scripts": {
+		"test": "bun test --pass-with-no-tests",
+		"lint": "biome check .",
+		"deadcode": "knip",
+		"verify": "bun test --pass-with-no-tests && biome check . && knip"
+	},
 	"pi": {
-		"extensions": ["./extensions/subagent/index.ts"],
-		"prompts": ["./extensions/subagent/prompts"]
+		"extensions": [
+			"./extensions/subagent/index.ts"
+		],
+		"prompts": [
+			"./extensions/subagent/prompts"
+		]
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-ai": "*",
@@ -15,5 +27,9 @@
 		"@earendil-works/pi-coding-agent": "*",
 		"@earendil-works/pi-tui": "*",
 		"typebox": "*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.14",
+		"knip": "6.37.0"
 	}
 }
