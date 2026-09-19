@@ -2,6 +2,57 @@
 
 Delegate tasks to specialized subagents with isolated context windows.
 
+> **afk-kit fork (ADR 0007).** This directory started as pi's first-party
+> `examples/extensions/subagent/` (MIT, pi 0.85.1 — see
+> [`LICENSE`](LICENSE) and [`../../VENDORED.md`](../../VENDORED.md) for
+> provenance). Tickets #16–#18 harden it, so `index.ts`, `agents.ts`, and
+> this README have **diverged from upstream** and left the sha manifest
+> (`VENDORED.sha256` now covers only the still-byte-identical files).
+>
+> Divergence points so far (ticket #16, R8 + R2):
+>
+> - **Non-blocking dispatch with wait/check** (adapted from the pattern
+>   proven by the pi-subagent-tool fork —
+>   [research](../../docs/research/pi-subagent-wait-check.md)). Single and
+>   parallel dispatch spawn **detached** children and block only up to
+>   `wait` seconds (default 180; `0` = return immediately, negative = wait
+>   forever; `background: true` ≡ `wait: 0`), then return
+>   `{status: "running", subagentId}`. Recover the result with
+>   `subagent({check: "<id>"})` (`history: "full"` for the whole stream).
+> - **Cancel, kill by id** — `subagent({cancel: "<id>"})` SIGTERMs the
+>   task's process group, then SIGKILLs survivors after a 5 s grace. The
+>   child leads its own group (detached spawn), so the wrapper and the pi
+>   grandchild die together. The fork this pattern came from has no cancel;
+>   the child pid/pgid record it would require is recorded in each task's
+>   `status.json` here.
+> - **Per-task wall-clock cap** — bounds the *task's* lifetime, not just a
+>   call's wait: a task exceeding it is killed and finished as `timeout`.
+>   The wait/check pattern's cap bounds only the coordinator's call.
+> - **Hang watchdog on the detached background path** — the proven watchdog
+>   covered only the foreground/chain path. Here the module watchdog checks
+>   every running task's `stdout.jsonl` size/mtime; no output for 5 minutes
+>   → SIGKILL, status `killed`. A task past its wall clock finishes
+>   `timeout`; an explicit cancel finishes `cancelled`.
+> - **Per-task status file** — `~/.pi/subagents/<id>/status.json` (override
+>   with `PI_SUBAGENT_DIR`), with `pid`/`pgid`, written tmp-then-rename.
+>   A generated runner wrapper records `done`/`failed` even if the parent
+>   session is gone. Tunables: `PI_SUBAGENT_WAIT_S`, `PI_SUBAGENT_POLL_MS`,
+>   `PI_SUBAGENT_WATCHDOG_MS`, `PI_SUBAGENT_STALE_MS`, `PI_SUBAGENT_MAX_MS`,
+>   `PI_SUBAGENT_TERM_GRACE_MS`.
+> - **Parallel** spawns all members detached (upstream's attached
+>   concurrency-limited loop is gone); progress streams as aggregate
+>   updates, and a hit wait cap returns the per-member id table.
+> - **Chain stays foreground** — sequential and streaming, Ctrl+C abort
+>   escalates TERM→KILL as upstream. Fix carried from the research: a
+>   signal-killed child resolves as failure (`code ?? 1` plus signal
+>   mapping), not upstream's silent success (`code ?? 0`).
+> - **R2 per-agent thinking** — a `thinking` frontmatter field (`off` …
+>   `max`) sets the agent's thinking level; the dispatch-level thinking is
+>   the fallback, inherited only when the agent also inherits the dispatch
+>   model.
+> - **POSIX only** — the runner wrapper is bash (upstream spawned the child
+>   directly).
+
 ## Features
 
 - **Isolated context**: Each subagent runs in a separate `pi` process
