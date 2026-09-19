@@ -1,11 +1,19 @@
 # Code verify standard
 
-How afk-kit's own code is proven — the layers, the toolchain, and the canonical
-command every afk-kit brief's **Verify commands** field cites. Resolved on
+How afk-kit's own code is proven — the order tests are written in, the layers,
+the toolchain, and the canonical command every afk-kit brief's **Verify
+commands** field cites. Resolved on
 ticket #12. Target repositories define their own verify commands in their
 briefs; this standard governs afk-kit's own tickets. The
 [package verify commands](package-verify.md) remain canonical for package and
 vendored-integrity work.
+
+## Tests come first
+
+Implementation on afk-kit tickets is test-first: the change starts with the
+failing test that pins the new behaviour or bug, then the code that makes it
+pass (the installed `tdd` skill runs the loop). The layers below govern what
+must be proven; this rule governs the order it is written in.
 
 ## The four layers
 

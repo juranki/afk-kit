@@ -28,6 +28,9 @@ Do not silently resolve a material conflict. Ask, or record the decision as an A
 - **`system-intent-modeling`** — when changing the model frame, characters, or stories.
 - **`domain-ontologies`** — when changing domain language or invariants.
 - **`domain-modeling`** — when recording an ADR.
+- **`tdd`** — when implementing or fixing any code in this repo: write the
+  failing test before the code that passes it. The standard is the
+  [code verify standard](docs/conventions/code-verify.md).
 - **`writing-for-agents`** — when editing this file, or authoring the skills this
   design describes.
 

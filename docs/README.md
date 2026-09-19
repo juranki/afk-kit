@@ -18,6 +18,7 @@ using the installed skills directly.
 | How to run a coordinator session (one issue, command to pull request) | Playbooks | [Coordinator session](playbooks/coordinator-session.md) |
 | Which label or state an issue carries, and who may move it | Conventions | [Issue lifecycle](conventions/issue-lifecycle.md) |
 | How branches, worktrees, and pull requests are named and shaped | Conventions | [Branching and PRs](conventions/branching-and-prs.md) |
+| How afk-kit's own code is proven — test-first order, layers, toolchain | Conventions | [Code verify standard](conventions/code-verify.md) |
 | What happens on review findings, repeated failure, or a blocked ticket | Conventions | [Review and escalation](conventions/review-and-escalation.md) |
 | What a ready-for-agent issue must contain | Brief standard | [Agent brief template](brief-template.md) |
 | What the subagent mechanism must do (baseline for [ADR 0007](adr/0007-vendored-subagent-mechanism.md)) | Requirements | [Subagent mechanism](requirements/subagent-mechanism.md) |
