@@ -1,13 +1,14 @@
 {
 	// Dead-code/dependency/export detection. Entry points mirror the pi
 	// manifest (package.json "pi" field): the vendored subagent extension is
-	// what pi loads at runtime. peerDependencies are runtime-provided by pi,
-	// not imported directly by afk-kit-owned code — knip sees them used via
-	// the vendored entry.
+	// what pi loads at runtime; colocated *.test.ts files import the fork's
+	// exports, so they are entries too. peerDependencies are runtime-provided
+	// by pi (they are also pinned devDependencies so bun test can resolve the
+	// module graph).
 	//
-	// Scope boundary mirrors biome.jsonc: when the fork modifies a vendored
-	// file, it leaves any exclusion here too.
+	// Scope boundary mirrors biome.jsonc: ticket #16 forked index.ts,
+	// agents.ts, and README.md out of the vendored tree, so the whole-directory
+	// ignore shrank to the still-unmodified vendored files.
 	"$schema": "./node_modules/knip/schema.json",
-	"entry": ["extensions/subagent/index.ts"],
-	"ignore": ["extensions/subagent/**"]
+	"entry": ["extensions/subagent/index.ts", "extensions/subagent/**/*.test.ts"]
 }

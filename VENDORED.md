@@ -19,6 +19,17 @@ lists (R5 confinement, R8 timeout/cancel, R2 per-agent thinking, R6 verdict).
   `sha256sum -c` runs directly against a pi checkout). Later fork tickets
   change them deliberately and must update the manifest to say so.
 
+  Fork-modified so far (ticket #16, R8 wait/check + cancel + wall-clock cap +
+  background watchdog, and R2 per-agent thinking — divergence points listed in
+  [`extensions/subagent/README.md`](extensions/subagent/README.md)):
+
+  - `extensions/subagent/index.ts`
+  - `extensions/subagent/agents.ts`
+  - `extensions/subagent/README.md`
+
+  New afk-kit-owned file: `extensions/subagent/background.ts` (the wait/check
+  machinery), with colocated tests `background.test.ts` / `agents.test.ts`.
+
 ## Files
 
 | File | Upstream path |

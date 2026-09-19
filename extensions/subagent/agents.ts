@@ -4,7 +4,12 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import {
+	CONFIG_DIR_NAME,
+	getAgentDir,
+	parseFrontmatter,
+} from "@earendil-works/pi-coding-agent";
 
 export type AgentScope = "user" | "project" | "both";
 
@@ -13,6 +18,7 @@ export interface AgentConfig {
 	description: string;
 	tools?: string[];
 	model?: string;
+	thinking?: ThinkingLevel;
 	systemPrompt: string;
 	source: "user" | "project";
 	filePath: string;
@@ -36,7 +42,34 @@ type AgentFrontmatter = {
 	description?: unknown;
 	tools?: unknown;
 	model?: unknown;
+	thinking?: unknown;
 };
+
+/**
+ * The thinking levels pi's CLI accepts (pi-agent-core's `ThinkingLevel`).
+ * A single source of truth for frontmatter parsing and error messages.
+ */
+export const THINKING_LEVELS = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+] as const;
+
+/**
+ * Normalize a frontmatter `thinking` value (R2). Only a valid level string is
+ * accepted; anything else yields no thinking rather than throwing — this runs
+ * inside agent discovery, where a bad field must not take down the agent.
+ */
+export function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
+	return typeof value === "string" &&
+		(THINKING_LEVELS as readonly string[]).includes(value)
+		? (value as ThinkingLevel)
+		: undefined;
+}
 
 /**
  * Normalize a frontmatter `tools` value to a list of tool names.
@@ -51,7 +84,11 @@ type AgentFrontmatter = {
  * bad file must not take down every other agent in the same directory.
  */
 function parseToolList(value: unknown): string[] | undefined {
-	const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+	const raw = Array.isArray(value)
+		? value
+		: typeof value === "string"
+			? value.split(",")
+			: [];
 	const tools = raw
 		.filter((t): t is string => typeof t === "string")
 		.map((t) => t.trim())
@@ -59,7 +96,10 @@ function parseToolList(value: unknown): string[] | undefined {
 	return tools.length > 0 ? tools : undefined;
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+function loadAgentsFromDir(
+	dir: string,
+	source: "user" | "project",
+): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
 	if (!fs.existsSync(dir)) {
@@ -87,7 +127,10 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 
 		const { frontmatter, body } = parseFrontmatter<AgentFrontmatter>(content);
 
-		if (typeof frontmatter.name !== "string" || typeof frontmatter.description !== "string") {
+		if (
+			typeof frontmatter.name !== "string" ||
+			typeof frontmatter.description !== "string"
+		) {
 			continue;
 		}
 
@@ -95,7 +138,9 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			name: frontmatter.name,
 			description: frontmatter.description,
 			tools: parseToolList(frontmatter.tools),
-			model: typeof frontmatter.model === "string" ? frontmatter.model : undefined,
+			model:
+				typeof frontmatter.model === "string" ? frontmatter.model : undefined,
+			thinking: parseThinkingLevel(frontmatter.thinking),
 			systemPrompt: body,
 			source,
 			filePath,
@@ -125,12 +170,19 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 	}
 }
 
-export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
+export function discoverAgents(
+	cwd: string,
+	scope: AgentScope,
+): AgentDiscoveryResult {
 	const userDir = path.join(getAgentDir(), "agents");
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 
-	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
-	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
+	const userAgents =
+		scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
+	const projectAgents =
+		scope === "user" || !projectAgentsDir
+			? []
+			: loadAgentsFromDir(projectAgentsDir, "project");
 
 	const agentMap = new Map<string, AgentConfig>();
 
@@ -144,14 +196,4 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	}
 
 	return { agents: Array.from(agentMap.values()), projectAgentsDir };
-}
-
-export function formatAgentList(agents: AgentConfig[], maxItems: number): { text: string; remaining: number } {
-	if (agents.length === 0) return { text: "none", remaining: 0 };
-	const listed = agents.slice(0, maxItems);
-	const remaining = agents.length - listed.length;
-	return {
-		text: listed.map((a) => `${a.name} (${a.source}): ${a.description}`).join("; "),
-		remaining,
-	};
 }
