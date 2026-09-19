@@ -14,7 +14,9 @@ lists (R5 confinement, R8 timeout/cancel, R2 per-agent thinking, R6 verdict).
 - **Upstream license:** MIT — Copyright (c) 2025 Mario Zechner. The full license
   text ships alongside the code as [`extensions/subagent/LICENSE`](extensions/subagent/LICENSE).
 - **Local modifications:** none. The files below are byte-identical to upstream
-  (sha256-verified at vendoring time; see the manifest). Later fork tickets
+  (sha256-verified at vendoring time; the checksums live in
+  [`VENDORED.sha256`](VENDORED.sha256), keyed by upstream-relative paths so
+  `sha256sum -c` runs directly against a pi checkout). Later fork tickets
   change them deliberately and must update the manifest to say so.
 
 ## Files
@@ -28,6 +30,10 @@ lists (R5 confinement, R8 timeout/cancel, R2 per-agent thinking, R6 verdict).
 | `extensions/subagent/prompts/*.md` | `examples/extensions/subagent/prompts/*.md` |
 | `extensions/subagent/LICENSE` | *(not upstream — pi's MIT license text, added for attribution)* |
 
+The repo-root [`VENDORED.sha256`](VENDORED.sha256) checksums every vendored file
+against its upstream path; it sits outside the tree so the vendored directory stays
+exactly upstream + `LICENSE`.
+
 ## Re-vendoring (upgrade to a newer pi)
 
 ```bash
@@ -36,6 +42,8 @@ cd /home/sprite/afk-kit
 rm -r extensions/subagent
 cp -a "$PI/examples/extensions/subagent" extensions/subagent
 # restore extensions/subagent/LICENSE (not upstream)
+# verify: from the upstream checkout,
+#   cd "$PI" && sha256sum -c /home/sprite/afk-kit/VENDORED.sha256
 # then diff against the previous vendored state and re-apply afk-kit's
 # fork changes deliberately, per the fork-hardening tickets
 ```
@@ -54,3 +62,7 @@ cp -a "$PI/examples/extensions/subagent" extensions/subagent
   see the vendored README's Installation section.
 - Core pi packages the extension imports are declared as `peerDependencies`
   with `"*"` per pi's package docs; pi provides them at runtime.
+- The vendored demo agents pin upstream models (e.g. `scout.md`'s
+  `model: claude-haiku-4-5`) that may not exist in a given environment; scratch
+  dispatches strip the `model:` line in a project-scope fixture — the procedure is
+  step 3 of the [package verify commands](docs/conventions/package-verify.md).
