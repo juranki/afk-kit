@@ -4,7 +4,9 @@
 	// what pi loads at runtime; colocated *.test.ts files import the fork's
 	// exports, so they are entries too. peerDependencies are runtime-provided
 	// by pi (they are also pinned devDependencies so bun test can resolve the
-	// module graph).
+	// module graph). scripts/drift-review.ts needs no entry: the verify script
+	// that runs it (ADR 0013's agentic drift review) already makes it one, and
+	// its colocated test is picked up like the others.
 	//
 	// Scope boundary mirrors biome.jsonc: ticket #16 forked index.ts,
 	// agents.ts, and README.md out of the vendored tree, so the whole-directory

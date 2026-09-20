@@ -11,13 +11,16 @@
 		"test": "bun test --pass-with-no-tests",
 		"lint": "biome check .",
 		"deadcode": "KNIP_DISABLE_RAW_TRANSFER=1 knip",
-		"verify": "bun test --pass-with-no-tests && biome check . && KNIP_DISABLE_RAW_TRANSFER=1 knip"
+		"verify": "bun test --pass-with-no-tests && biome check . && KNIP_DISABLE_RAW_TRANSFER=1 knip && bun scripts/drift-review.ts"
 	},
 	"pi": {
 		"extensions": [
 			"./extensions/subagent/index.ts",
 			"./extensions/readiness/index.ts",
 			"./extensions/coordinator/index.ts"
+		],
+		"skills": [
+			"./skills"
 		],
 		"prompts": [
 			"./extensions/subagent/prompts"
