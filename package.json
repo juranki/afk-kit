@@ -10,8 +10,8 @@
 	"scripts": {
 		"test": "bun test --pass-with-no-tests",
 		"lint": "biome check .",
-		"deadcode": "knip",
-		"verify": "bun test --pass-with-no-tests && biome check . && knip"
+		"deadcode": "KNIP_DISABLE_RAW_TRANSFER=1 knip",
+		"verify": "bun test --pass-with-no-tests && biome check . && KNIP_DISABLE_RAW_TRANSFER=1 knip"
 	},
 	"pi": {
 		"extensions": [
