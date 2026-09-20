@@ -10,6 +10,11 @@ anticipates them becoming deterministic guardrails).
   pre-push round adds value is an open question in the model frame).
 - The `reviewer` subagent (`glm-5.3`) may run the brief's verify commands and returns a
   structured verdict: **approve**, or **request-changes** with severity-ranked findings.
+  The verdict's wire format — the fenced JSON block and its schema, including the
+  `blocker`/`major`/`minor` severity ladder and unparseable-as-escalation — is owned by
+  the toolkit's fork: [`extensions/subagent/verdict.ts`](../../extensions/subagent/verdict.ts)
+  and the [reviewer agent definition](../../extensions/subagent/agents/reviewer.md)
+  ([ADR 0007](../adr/0007-vendored-subagent-mechanism.md), ticket #18).
 - Findings go to a fresh implementer in the same worktree; the fix is pushed; the
   reviewer reviews again.
 

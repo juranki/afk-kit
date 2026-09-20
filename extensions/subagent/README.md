@@ -5,9 +5,11 @@ Delegate tasks to specialized subagents with isolated context windows.
 > **afk-kit fork (ADR 0007).** This directory started as pi's first-party
 > `examples/extensions/subagent/` (MIT, pi 0.85.1 — see
 > [`LICENSE`](LICENSE) and [`../../VENDORED.md`](../../VENDORED.md) for
-> provenance). Tickets #16–#18 harden it, so `index.ts`, `agents.ts`, and
-> this README have **diverged from upstream** and left the sha manifest
-> (`VENDORED.sha256` now covers only the still-byte-identical files).
+> provenance). Tickets #16–#18 harden it, so `index.ts`, `agents.ts`, the
+> shipped [`reviewer`](agents/reviewer.md) (replacing the upstream demo agent
+> of the same name), and this README have **diverged from upstream** and left
+> the sha manifest (`VENDORED.sha256` now covers only the
+> still-byte-identical files).
 >
 > Divergence points so far (ticket #16, R8 + R2):
 >
@@ -80,6 +82,15 @@ Delegate tasks to specialized subagents with isolated context windows.
 >   field in the structured result and in the tool text and check output —
 >   report lines, never errors: refusals are normal for a confined
 >   implementer; the coordinator publishes.
+> - **R6 verdict convention (#18)** — the reviewer's output is a contract,
+>   not prose to interpret: the shipped [`reviewer`](agents/reviewer.md) ends
+>   its final message with one fenced ```json block — `approve`, or
+>   `request-changes` with severity-ranked findings (`blocker` > `major` >
+>   `minor`) — and the coordinator parses that block deterministically with
+>   [`verdict.ts`](verdict.ts) (L1-tested in `verdict.test.ts`). The reviewer
+>   is **not confined** and is handed the pushed diff in its task text (map
+>   review 2026-09-19), so it needs no `gh`. An unparseable verdict escalates
+>   like any other failure (ADR 0007).
 
 ## Features
 
@@ -99,10 +110,11 @@ subagent/
 ├── agents.ts            # Agent discovery logic
 ├── background.ts        # The wait/check background machinery (R8)
 ├── confinement.ts       # Implementer confinement: env allowlist, PATH shim, git pin (R5)
+├── verdict.ts           # The R6 verdict convention's deterministic parse
 ├── agents/              # Sample agent definitions
 │   ├── scout.md         # Fast recon, returns compressed context
 │   ├── planner.md       # Creates implementation plans
-│   ├── reviewer.md      # Code review
+│   ├── reviewer.md      # Diff review, returns the JSON verdict (R6; replaced the demo)
 │   ├── worker.md        # General-purpose (full capabilities)
 │   └── implementer.md   # Ticket implementation, confined (R5)
 └── prompts/             # Workflow presets (prompt templates)

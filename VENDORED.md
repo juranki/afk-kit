@@ -21,20 +21,26 @@ lists (R5 confinement, R8 timeout/cancel, R2 per-agent thinking, R6 verdict).
 
   Fork-modified so far (ticket #16, R8 wait/check + cancel + wall-clock cap +
   background watchdog, and R2 per-agent thinking; ticket #17, R5 implementer
-  confinement — divergence points listed in
-  [`extensions/subagent/README.md`](extensions/subagent/README.md)):
+  confinement; ticket #18, R6 verdict convention — divergence points listed
+  in [`extensions/subagent/README.md`](extensions/subagent/README.md)):
 
   - `extensions/subagent/index.ts`
   - `extensions/subagent/agents.ts`
   - `extensions/subagent/README.md`
+  - `extensions/subagent/agents/reviewer.md` (#18 — replaced in place by the
+    shipped reviewer, which returns the JSON verdict; the upstream demo
+    agent of the same name is gone)
 
   New afk-kit-owned files: `extensions/subagent/background.ts` (the wait/check
-  machinery) and `extensions/subagent/confinement.ts` (the R5 confinement:
-  env allowlist, PATH shim, git pin), with colocated tests `background.test.ts`,
-  `confinement.test.ts`, and `agents.test.ts`. The shipped roster gained
-  `extensions/subagent/agents/implementer.md` (ticket #17) — an afk-kit file,
-  not an upstream one; the remaining `agents/*.md` and `prompts/*.md` are
-  upstream-byte-identical and sha-tracked below.
+  machinery), `extensions/subagent/confinement.ts` (the R5 confinement:
+  env allowlist, PATH shim, git pin), and `extensions/subagent/verdict.ts`
+  (the R6 verdict convention's deterministic coordinator-side parse), with
+  colocated tests `background.test.ts`, `confinement.test.ts`,
+  `verdict.test.ts`, and `agents.test.ts`. The shipped roster gained
+  `extensions/subagent/agents/implementer.md` (ticket #17) and replaced
+  `extensions/subagent/agents/reviewer.md` (ticket #18) — afk-kit files, not
+  upstream ones; the remaining `agents/*.md` (`planner`, `scout`, `worker`)
+  and `prompts/*.md` are upstream-byte-identical and sha-tracked below.
 
 ## Files
 
@@ -83,3 +89,5 @@ cp -a "$PI/examples/extensions/subagent" extensions/subagent
   `model: claude-haiku-4-5`) that may not exist in a given environment; scratch
   dispatches strip the `model:` line in a project-scope fixture — the procedure is
   step 3 of the [package verify commands](docs/conventions/package-verify.md).
+  The shipped `implementer` and `reviewer` pin `glm-5.3-flash` and `glm-5.3`,
+  which this environment's model store has (ADR 0004's routing).

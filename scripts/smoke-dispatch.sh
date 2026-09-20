@@ -13,6 +13,13 @@
 # and `git push`, is refused (exit 126, CONFINEMENT_REFUSAL), commits locally
 # anyway, and reports the refusals as report lines. The script verifies the
 # commit landed in the scratch repo and prints PASS/FAIL per check.
+#
+# Phase 3 (R6 verdict round, #18): the parent dispatches the shipped reviewer
+# on a scratch diff fed in the task text (the decided convention: the
+# coordinator hands over the pushed diff; the reviewer never fetches). The
+# child's final output is parsed with the fork's real parseVerdict
+# (extensions/subagent/verdict.ts); the round passes only if the verdict is
+# parseable — approve or request-changes.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -68,6 +75,86 @@ if [[ -n "$task_dir" ]] && grep -q 'CONFINEMENT_REFUSAL' "$task_dir/stdout.jsonl
 else
 	echo "FAIL: no CONFINEMENT_REFUSAL lines found in the newest task record"; fail=1
 fi
+
+# ── phase 3: the reviewer's verdict round (R6, #18) ──
+echo "── phase 3: reviewer verdict round on a scratch diff (R6) ──"
+mkdir -p "$DEMO/review"
+cd "$DEMO/review"
+git init -q -b main .
+cat > lib.js <<'EOF'
+function countWords(text) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+module.exports = { countWords };
+EOF
+git add lib.js
+git -c user.name=smoke -c user.email=smoke@example.com commit -qm "base: countWords"
+cat > lib.js <<'EOF'
+function countWords(text) {
+  if (typeof text !== "string") return 0;
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+module.exports = { countWords };
+EOF
+git add lib.js
+git -c user.name=smoke -c user.email=smoke@example.com commit -qm "guard countWords against non-string input"
+cp "$REPO_ROOT/extensions/subagent/agents/reviewer.md" "$DEMO/.pi/agents/reviewer.md"
+
+task_before="$(ls -td "$HOME/.pi/agent/subagents"/*/ 2>/dev/null | head -1 || true)"
+{
+	cat <<'EOF'
+Review this pushed diff for one review round.
+
+The brief's verify command (run it exactly as written, from your working directory): bun -e 'const {countWords} = require("./lib.js"); if (countWords("a b c") !== 3 || countWords(42) !== 0) process.exit(1)'
+
+## Pushed diff
+
+```diff
+EOF
+	git diff HEAD~1..HEAD
+	cat <<'EOF'
+```
+
+Return your review notes and end with the verdict JSON block, exactly as your instructions specify.
+EOF
+} > "$DEMO/review-task.md"
+
+pi -p --no-session "Call the subagent tool exactly once with: agent=reviewer, agentScope=both, task=$(cat "$DEMO/review-task.md"). If the tool returns a running subagentId, poll it with subagent({check: ...}) until it finishes. Then report the subagent's final output verbatim and nothing else."
+
+task_after="$(ls -td "$HOME/.pi/agent/subagents"/*/ 2>/dev/null | head -1 || true)"
+if [[ -z "$task_after" || "$task_after" == "$task_before" ]]; then
+	echo "FAIL: no new subagent task record for the reviewer dispatch"; fail=1
+else
+	echo "PASS: reviewer task record at $task_after"
+	TASK_STDOUT="$task_after/stdout.jsonl" VERDICT_TS="$REPO_ROOT/extensions/subagent/verdict.ts" bun -e '
+import { readFileSync } from "node:fs";
+const { parseVerdict } = await import(process.env.VERDICT_TS);
+const events = readFileSync(process.env.TASK_STDOUT, "utf-8").split("\n").filter(Boolean);
+let finalText = "";
+for (const line of events) {
+	let event;
+	try { event = JSON.parse(line); } catch { continue; }
+	const message = event.message;
+	if (message?.role === "assistant") {
+		for (const part of message.content ?? []) {
+			if (part.type === "text") finalText = part.text;
+		}
+	}
+}
+if (!finalText) { console.log("FAIL: no assistant text in the reviewer task record"); process.exit(1); }
+console.log("child final output: " + finalText.length + " chars");
+const parsed = parseVerdict(finalText);
+if (!parsed.ok) {
+	console.log("FAIL: verdict unparseable — " + parsed.reason);
+	process.exit(1);
+}
+console.log("PASS: parseable verdict — " + parsed.verdict.verdict + ", " + parsed.verdict.findings.length + " finding(s)");
+for (const finding of parsed.verdict.findings) {
+	console.log("  [" + finding.severity + "] " + (finding.file ?? "?") + (finding.line ? ":" + finding.line : "") + " — " + finding.summary);
+}
+' || fail=1
+fi
+
 [[ $fail -eq 0 ]] && echo "SMOKE OK" || {
 	echo "SMOKE FAILED"; exit 1
 }
