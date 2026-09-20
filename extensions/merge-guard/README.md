@@ -15,13 +15,18 @@ blocks merge-capable ones with a `MERGE_GATE_REFUSAL` refusal whose reason
 names the gate ([ADR 0002](../../../docs/adr/0002-human-merge-gate.md)) and
 instructs stop-and-report per the escalation convention:
 
-- **`gh-pr-merge`** — any `gh pr merge` invocation, with any flags.
+- **`gh-pr-merge`** — any `gh pr merge` invocation, with any flags —
+  read from the command segment's actual subcommand, so merely quoting the
+  phrase in a flag payload does not fire it.
 - **`merge-api`** — the pull-request merge endpoint
   (`repos/<o>/<r>/pulls/<n>/merge`, REST or as a URL), the GraphQL
   `mergePullRequest` mutation, and the branch-merge endpoint
-  (`repos/<o>/<r>/merges`) when `base` names `main` — each only when the
-  command also carries a network carrier (`gh api`/`gh graphql`, the GitHub
-  API host, any URL), so grepping docs for these strings passes.
+  (`repos/<o>/<r>/merges`) when `base` names `main`. The fragment refuses
+  only when its own segment is an actual network call: a `gh` invocation
+  whose parsed subcommand is `api`/`graphql`, or a non-`gh` segment that
+  carries a network carrier (the words `gh api`/`gh graphql`, the GitHub
+  API host, any URL) — a `curl` of the endpoint, say — so grepping docs
+  for these strings passes.
 - **`push-to-main`** — `git push` variants whose destination is `main`:
   explicit `main`/`refs/heads/main` refspecs in any spelling (including
   deletes, forces, and `HEAD:main`), `--all` and `--mirror` (which carry
@@ -35,10 +40,13 @@ instructs stop-and-report per the escalation convention:
 The legitimate publisher path is untouched: pushes to `issue-*` branches
 (explicit refspecs, `--force-with-lease`, `-u`), PR creation, `gh pr view`
 and other reads, the coordinator ops (`claim_issue`, `publish_pr`),
-local `git merge`, `git pull`/`git fetch` of `main`. Other extensions' tools
-(the subagent tool, readiness check, coordinator tools) are not shell
-invocations and are simply not inspected; subagent children are bound by
-their own loaded copy of this guard.
+local `git merge`, `git pull`/`git fetch` of `main`. So are commands whose
+flag payloads merely quote the trigger patterns — a `gh issue comment`
+whose `--body` says `gh pr merge`, an inline `node -e` script containing
+the endpoint path: payload text is data, not command (#36). Other
+extensions' tools (the subagent tool, readiness check, coordinator tools)
+are not shell invocations and are simply not inspected; subagent children
+are bound by their own loaded copy of this guard.
 
 ## The honest strength bar
 
@@ -58,10 +66,18 @@ goes out of its way, and the bypasses are documented, not hidden:
   0011). The TUI's `!` shell escape is likewise the human's own verbatim
   command with no model in the loop; it is the maintainer's hand, not agent
   action, and does not pass the `tool_call` boundary.
-- **Over-matching, not under-matching** — the guard matches command
-  *strings*, so a command that merely contains a refused fragment (an
-  `echo` or a grep of a literal `git push origin main`) refuses too. That
-  false-positive class is a documented cost: rephrase the command.
+- **Over-matching, not under-matching** — the `git push` check matches
+  command *strings*, so a command that merely contains a refused fragment
+  (an `echo` or a grep of a literal `git push origin main`) refuses too.
+  That false-positive class is a documented cost: rephrase the command.
+  The gh and API checks are the opposite (#36): they parse each command
+  segment's actual subcommand, so flag-payload text — comment bodies,
+  commit messages, inline scripts — is data, never command, and quoting
+  merge vocabulary in a `--body` passes. Endpoint fragments are scanned
+  only when the segment's parsed subcommand is `gh api`/`gh graphql`, or a
+  non-`gh` segment carries a network carrier — so a URL pasted into a
+  non-`gh` command's payload can still refuse, the residue of the
+  string-level class.
 
 Enforcement costs the maintainer in-session merges and direct-to-`main`
 pushes for as long as afk-kit is installed — that is the point. Server-side

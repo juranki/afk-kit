@@ -74,6 +74,53 @@ describe("inspectCommand — pull-request merge API", () => {
 	});
 });
 
+describe("inspectCommand — flag payloads are data, not commands", () => {
+	test("a tracker write whose --body quotes the trigger patterns passes", () => {
+		const body = "never run gh pr merge 30 --squash, nor mergePullRequest";
+		expect(inspectCommand(`gh issue comment 30 --body "${body}"`)).toBeNull();
+		expect(
+			inspectCommand(`gh issue create --title t --body "${body}"`),
+		).toBeNull();
+	});
+
+	test("a URL in a tracker-write payload does not fire the endpoint patterns", () => {
+		expect(
+			inspectCommand(
+				'gh issue comment 30 --body "see https://api.github.com/repos/o/r/pulls/12/merge"',
+			),
+		).toBeNull();
+	});
+
+	test("an inline script whose text merely contains the patterns passes", () => {
+		expect(
+			inspectCommand(`node -e 'console.log("gh pr merge 30 --squash")'`),
+		).toBeNull();
+		expect(
+			inspectCommand(`bun -e "console.log('mutation { mergePullRequest }')"`),
+		).toBeNull();
+	});
+
+	test("a non-gh segment whose payload quotes a full gh api merge invocation still refuses (documented residue of the string-level class)", () => {
+		expect(
+			inspectCommand(
+				`node -e 'console.log("gh api repos/o/r/pulls/12/merge -X PUT")'`,
+			)?.kind,
+		).toBe("merge-api");
+	});
+
+	test("gh pr merge still refuses past gh global flags, env prefixes, and wrappers", () => {
+		expect(inspectCommand("gh -R o/r pr merge 30 --squash")?.kind).toBe(
+			"gh-pr-merge",
+		);
+		expect(inspectCommand("GH_TOKEN=x gh pr merge 30 --squash")?.kind).toBe(
+			"gh-pr-merge",
+		);
+		expect(
+			inspectCommand("sudo gh api repos/o/r/pulls/12/merge -X PUT")?.kind,
+		).toBe("merge-api");
+	});
+});
+
 describe("inspectCommand — git push targeting main", () => {
 	test("refuses an explicit main refspec", () => {
 		expect(inspectCommand("git push origin main")?.kind).toBe("push-to-main");

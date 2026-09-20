@@ -7,6 +7,14 @@
  * pushes (a bare `git push`, a bare `HEAD` refspec) are flagged by
  * `needsHead` and resolved by the caller (evaluate.ts) with real git.
  *
+ * Command versus payload (#36): the gh and API checks parse each command
+ * segment's actual subcommand (as the push check parses its positionals)
+ * instead of raw-scanning the command line, so merge vocabulary inside a
+ * flag payload — a comment body, a commit message, an inline script — is
+ * data, never command. Endpoint fragments are scanned only when the
+ * segment's real subcommand is a network one (`gh api`/`gh graphql`) or a
+ * non-`gh` segment carries a network carrier (the API host, any URL).
+ *
  * The strength bar is ADR 0011's, stated honestly: airtight within a loaded
  * session at accident level, not adversarially — the documented bypass is
  * editing or uninstalling the toolkit between sessions (README.md).
@@ -20,13 +28,12 @@ export interface MergeRefusal {
 	matched: string;
 }
 
-/** Any subcommand sequence `gh pr merge`, anywhere in the command line. */
-const GH_PR_MERGE = /\bgh\s+pr\s+merge\b/;
-
 /**
  * Network carriers that turn a merge-endpoint fragment into an API call:
  * gh's api/graphql subcommands, the GitHub API host, or any URL. A bare
- * fragment with no carrier (a docs grep, an echo) passes.
+ * fragment with no carrier (a docs grep, an echo) passes. For a segment
+ * whose command is `gh`, the carrier question is answered by subcommand
+ * parsing instead; this raw scan governs only non-`gh` segments.
  */
 const NETWORK_CARRIER = /\bgh\s+(?:api|graphql)\b|api\.github\.com|https?:\/\//;
 
@@ -67,6 +74,28 @@ const PUSH_VALUE_FLAGS = new Set([
 	"-o",
 ]);
 
+/** gh global flags that take the next token as their value — needed to
+ * find the subcommand slot past forms like `gh -R o/r api`. */
+const GH_GLOBAL_VALUE_FLAGS = new Set([
+	"-R",
+	"--repo",
+	"--hostname",
+	"--jq",
+	"--template",
+]);
+
+/** Leading commands whose only effect is to run what follows them. */
+const COMMAND_WRAPPERS = new Set([
+	"command",
+	"exec",
+	"sudo",
+	"doas",
+	"nohup",
+	"nice",
+	"time",
+	"env",
+]);
+
 const SEGMENT_SPLIT = /&&|\|\||;|\||\n/;
 
 /** Strip quoting and subshell punctuation from one whitespace token. */
@@ -79,6 +108,51 @@ function tokens(segment: string): string[] {
 		.split(/\s+/)
 		.map(cleanToken)
 		.filter((word) => word.length > 0);
+}
+
+/**
+ * The word index of the segment's command: past leading `VAR=value`
+ * assignments and wrapper commands (`sudo`, `env`, `timeout 10`, ...).
+ */
+function commandIndex(words: string[]): number {
+	let i = 0;
+	while (i < words.length) {
+		const word = words[i];
+		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
+			i += 1;
+		} else if (word === "timeout" && /^\d/.test(words[i + 1] ?? "")) {
+			i += 2;
+		} else if (COMMAND_WRAPPERS.has(word)) {
+			i += 1;
+		} else {
+			return i;
+		}
+	}
+	return -1;
+}
+
+/** Walk gh's global flags (consuming flag values) from word index `i`. */
+function skipGhGlobalFlags(words: string[], i: number): number {
+	while (i < words.length && words[i].startsWith("-")) {
+		i += GH_GLOBAL_VALUE_FLAGS.has(words[i]) ? 2 : 1;
+	}
+	return i;
+}
+
+/**
+ * The gh subcommand of a segment whose command is `gh`: the first
+ * subcommand slot after gh's global flags, one level deeper for `pr`.
+ * Returns e.g. "pr merge", "api", "issue"; null when the segment runs out
+ * before a subcommand appears.
+ */
+function ghSubcommand(words: string[], gh: number): string | null {
+	let i = skipGhGlobalFlags(words, gh + 1);
+	const first = words[i];
+	if (first === undefined) return null;
+	if (first !== "pr") return first;
+	i = skipGhGlobalFlags(words, i + 1);
+	const second = words[i];
+	return second === undefined ? first : `${first} ${second}`;
 }
 
 /**
@@ -256,30 +330,59 @@ function pushRefusal(
 	return null;
 }
 
+/**
+ * The merge-endpoint scan for one segment, governed by the raw carrier
+ * rule: the fragment refuses only when the segment also carries a network
+ * carrier (gh api/graphql named as words, the GitHub API host, any URL),
+ * so grepping docs for these strings passes.
+ */
+function apiRefusal(segment: string): MergeRefusal | null {
+	if (!NETWORK_CARRIER.test(segment)) return null;
+	const endpoint =
+		PR_MERGE_ENDPOINT.exec(segment) ?? GRAPHQL_PR_MERGE.exec(segment);
+	if (endpoint) {
+		return { kind: "merge-api", matched: endpoint[0] };
+	}
+	const branchMerge = BRANCH_MERGE_ENDPOINT.exec(segment);
+	if (branchMerge && BRANCH_MERGE_BASE_MAIN.test(segment)) {
+		return { kind: "merge-api", matched: branchMerge[0] };
+	}
+	return null;
+}
+
+/**
+ * One segment's refusal: the gh and API checks parse the segment's actual
+ * command and subcommand, so a non-`gh` segment keeps the raw carrier rule
+ * and a `gh` segment treats its flag payloads as data — scanned only when
+ * the parsed subcommand is a network one. The push check stays a positional
+ * walk that finds `git` anywhere in the segment.
+ */
+function segmentRefusal(words: string[], segment: string): MergeRefusal | null {
+	const cmd = commandIndex(words);
+	if (cmd !== -1 && words[cmd] === "gh") {
+		const sub = ghSubcommand(words, cmd);
+		if (sub === "pr merge") {
+			return { kind: "gh-pr-merge", matched: "gh pr merge" };
+		}
+		if (sub === "api" || sub === "graphql") {
+			return apiRefusal(segment);
+		}
+		return null;
+	}
+	return apiRefusal(segment);
+}
+
 export function inspectCommand(
 	command: string,
 	head?: string | null,
 ): MergeRefusal | null {
-	const prMerge = GH_PR_MERGE.exec(command);
-	if (prMerge) {
-		return { kind: "gh-pr-merge", matched: prMerge[0] };
-	}
-	if (NETWORK_CARRIER.test(command)) {
-		const endpoint =
-			PR_MERGE_ENDPOINT.exec(command) ?? GRAPHQL_PR_MERGE.exec(command);
-		if (endpoint) {
-			return { kind: "merge-api", matched: endpoint[0] };
-		}
-		const branchMerge = BRANCH_MERGE_ENDPOINT.exec(command);
-		if (branchMerge && BRANCH_MERGE_BASE_MAIN.test(command)) {
-			return { kind: "merge-api", matched: branchMerge[0] };
-		}
-	}
 	for (const segment of command.split(SEGMENT_SPLIT)) {
 		const words = tokens(segment);
+		const refusal = segmentRefusal(words, segment);
+		if (refusal) return refusal;
 		if (pushIndex(words) !== -1) {
-			const refusal = pushRefusal(words, head ?? null);
-			if (refusal) return refusal;
+			const push = pushRefusal(words, head ?? null);
+			if (push) return push;
 		}
 	}
 	return null;
