@@ -36,7 +36,7 @@ export type GhRunner = (
 	args: string[],
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
-function runGh(cwd: string): GhRunner {
+export function runGh(cwd: string): GhRunner {
 	return (args) =>
 		new Promise((resolve, reject) => {
 			const child = spawn("gh", args, { cwd });

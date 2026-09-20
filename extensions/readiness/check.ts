@@ -99,9 +99,9 @@ function checkBriefFields(body: string): Inspection {
 	};
 }
 
-function checkVerifyCommands(body: string): Inspection {
-	const brief = parseBrief(body);
-	const commands = brief.verifyCommands.value
+/** The verify commands as a list, one per `- ` line, backticks stripped. */
+export function verifyCommandList(value: string): string[] {
+	return value
 		.split("\n")
 		.map((line) =>
 			line
@@ -110,6 +110,11 @@ function checkVerifyCommands(body: string): Inspection {
 				.trim(),
 		)
 		.filter((line) => line !== "");
+}
+
+function checkVerifyCommands(body: string): Inspection {
+	const brief = parseBrief(body);
+	const commands = verifyCommandList(brief.verifyCommands.value);
 	if (commands.length === 0) {
 		return {
 			name: "verify-commands",
