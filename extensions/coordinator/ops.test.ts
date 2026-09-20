@@ -173,7 +173,7 @@ async function makeWorld(
 			},
 			{
 				args: ["issue", "view", String(issue), "--json", "assignees"],
-				json: [{ login: "maintainer" }],
+				json: { assignees: [{ login: "maintainer" }] },
 			},
 			{
 				args: ["issue", "edit", String(issue), "--add-label", "in-progress"],
