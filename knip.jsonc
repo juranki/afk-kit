@@ -16,8 +16,10 @@
 		"extensions/subagent/index.ts",
 		"extensions/readiness/index.ts",
 		"extensions/coordinator/index.ts",
+		"extensions/merge-guard/index.ts",
 		"extensions/subagent/**/*.test.ts",
 		"extensions/readiness/**/*.test.ts",
-		"extensions/coordinator/**/*.test.ts"
+		"extensions/coordinator/**/*.test.ts",
+		"extensions/merge-guard/**/*.test.ts"
 	]
 }
