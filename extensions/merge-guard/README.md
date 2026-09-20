@@ -16,8 +16,12 @@ names the gate ([ADR 0002](../../../docs/adr/0002-human-merge-gate.md)) and
 instructs stop-and-report per the escalation convention:
 
 - **`gh-pr-merge`** — any `gh pr merge` invocation, with any flags —
-  read from the command segment's actual subcommand, so merely quoting the
-  phrase in a flag payload does not fire it.
+  found at every position where a command actually begins: the segment's
+  own command (past assignments, loop keywords like `do`/`then`, and
+  wrappers that consume flag values — `sudo`, `env -u X`, `nice -n 5`,
+  `timeout 10`), `xargs`'s trailing command, a `sh -c`/`bash -c` body,
+  and `$()`/backtick spans. Merely quoting the phrase in a flag payload
+  does not fire it; composing it out of sight does.
 - **`merge-api`** — the pull-request merge endpoint
   (`repos/<o>/<r>/pulls/<n>/merge`, REST or as a URL), the GraphQL
   `mergePullRequest` mutation, and the branch-merge endpoint
@@ -70,14 +74,20 @@ goes out of its way, and the bypasses are documented, not hidden:
   command *strings*, so a command that merely contains a refused fragment
   (an `echo` or a grep of a literal `git push origin main`) refuses too.
   That false-positive class is a documented cost: rephrase the command.
-  The gh and API checks are the opposite (#36): they parse each command
-  segment's actual subcommand, so flag-payload text — comment bodies,
-  commit messages, inline scripts — is data, never command, and quoting
-  merge vocabulary in a `--body` passes. Endpoint fragments are scanned
-  only when the segment's parsed subcommand is `gh api`/`gh graphql`, or a
-  non-`gh` segment carries a network carrier — so a URL pasted into a
-  non-`gh` command's payload can still refuse, the residue of the
-  string-level class.
+  The gh and API checks are the opposite (#36): they parse command
+  *position* — the segment's own command, `xargs`'s trailing command, a
+  `sh -c` body, `$()`/backtick spans — so flag-payload text — comment
+  bodies, commit messages, inline scripts — is data, never command, and
+  quoting merge vocabulary in a `--body` passes. Because substitution
+  spans execute even inside a double-quoted payload, their text is
+  scanned as command; a *single-quoted* span the shell would leave
+  literal, or a JavaScript template literal inside an inline script, can
+  therefore false-refuse — the same string-level residue class as the
+  push check's, rephraseable the same way. Endpoint fragments are
+  scanned only when the segment's parsed subcommand is
+  `gh api`/`gh graphql`, or a non-`gh` segment carries a network carrier
+  — so a URL pasted into a non-`gh` command's payload can still refuse,
+  the residue of the string-level class.
 
 Enforcement costs the maintainer in-session merges and direct-to-`main`
 pushes for as long as afk-kit is installed — that is the point. Server-side

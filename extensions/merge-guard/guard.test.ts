@@ -121,6 +121,82 @@ describe("inspectCommand — flag payloads are data, not commands", () => {
 	});
 });
 
+describe("inspectCommand — composed command positions refuse (#36)", () => {
+	test("the loop body after do is a command position", () => {
+		expect(
+			inspectCommand("for pr in 1 2 3; do gh pr merge $pr --squash; done")
+				?.kind,
+		).toBe("gh-pr-merge");
+	});
+
+	test("xargs trailing arguments are a command position", () => {
+		expect(inspectCommand("gh pr list | xargs -n1 gh pr merge")?.kind).toBe(
+			"gh-pr-merge",
+		);
+	});
+
+	test("xargs with a non-gh command keeps its arguments as payload", () => {
+		expect(
+			inspectCommand("gh pr list | xargs -n1 echo 'gh pr merge'"),
+		).toBeNull();
+	});
+
+	test("command substitution spans are command text, whatever leads the segment", () => {
+		for (const cmd of [
+			"RESULT=$(gh pr merge 30 --squash)",
+			"echo $(gh pr merge 30)",
+			"echo `gh pr merge 30`",
+		]) {
+			expect(inspectCommand(cmd)?.kind).toBe("gh-pr-merge");
+		}
+	});
+
+	test("a substitution span carrying a read stays a read", () => {
+		expect(inspectCommand('echo "$(gh pr list)"')).toBeNull();
+	});
+
+	test("sh -c and bash -c bodies are command text", () => {
+		expect(inspectCommand('sh -c "gh pr merge 30 --squash"')?.kind).toBe(
+			"gh-pr-merge",
+		);
+		expect(inspectCommand("bash -c 'gh pr merge 30'")?.kind).toBe(
+			"gh-pr-merge",
+		);
+	});
+
+	test("flag-consuming wrappers resolve to their command", () => {
+		for (const cmd of [
+			"nice -n 5 gh pr merge 30",
+			"env -u X gh pr merge 30",
+			"sudo -u root gh pr merge 30",
+			"nohup gh pr merge 30",
+			"timeout 10 gh pr merge 30",
+		]) {
+			expect(inspectCommand(cmd)?.kind).toBe("gh-pr-merge");
+		}
+	});
+});
+
+describe("inspectCommand — matched names the invoked fragment", () => {
+	test("the plain invocation", () => {
+		expect(inspectCommand("gh pr merge 30 --squash")?.matched).toBe(
+			"gh pr merge",
+		);
+	});
+
+	test("global flags between gh and the subcommand are included", () => {
+		expect(inspectCommand("gh -R o/r pr merge 30")?.matched).toBe(
+			"gh -R o/r pr merge",
+		);
+	});
+
+	test("wrappers before gh are not part of the fragment", () => {
+		expect(inspectCommand("env -u X gh pr merge 30")?.matched).toBe(
+			"gh pr merge",
+		);
+	});
+});
+
 describe("inspectCommand — git push targeting main", () => {
 	test("refuses an explicit main refspec", () => {
 		expect(inspectCommand("git push origin main")?.kind).toBe("push-to-main");

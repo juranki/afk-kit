@@ -7,13 +7,16 @@
  * pushes (a bare `git push`, a bare `HEAD` refspec) are flagged by
  * `needsHead` and resolved by the caller (evaluate.ts) with real git.
  *
- * Command versus payload (#36): the gh and API checks parse each command
- * segment's actual subcommand (as the push check parses its positionals)
- * instead of raw-scanning the command line, so merge vocabulary inside a
- * flag payload — a comment body, a commit message, an inline script — is
- * data, never command. Endpoint fragments are scanned only when the
- * segment's real subcommand is a network one (`gh api`/`gh graphql`) or a
- * non-`gh` segment carries a network carrier (the API host, any URL).
+ * Command versus payload (#36): the gh-pr-merge check parses command
+ * position structurally — the segment's own command past assignments,
+ * loop keywords, and value-consuming wrappers; `xargs`'s trailing
+ * command; a `sh -c` body; and `$()`/backtick spans, which the shell
+ * itself executes — so composition cannot hide an invocation, while
+ * merge vocabulary in payload position (a comment body, a commit
+ * message, an inline script) stays data, never command. The API check
+ * keeps the raw carrier rule: endpoint fragments are scanned only when
+ * the segment's parsed subcommand is `gh api`/`gh graphql` or a non-`gh`
+ * segment carries a network carrier (the API host, any URL).
  *
  * The strength bar is ADR 0011's, stated honestly: airtight within a loaded
  * session at accident level, not adversarially — the documented bypass is
@@ -84,17 +87,90 @@ const GH_GLOBAL_VALUE_FLAGS = new Set([
 	"--template",
 ]);
 
-/** Leading commands whose only effect is to run what follows them. */
-const COMMAND_WRAPPERS = new Set([
-	"command",
-	"exec",
-	"sudo",
-	"doas",
-	"nohup",
-	"nice",
-	"time",
-	"env",
+/** Shell keywords transparent to the command position: the word after
+ * them is still the segment's command (`for x in y; do gh …`). `for` is
+ * not one — its next word is the loop variable, and `in`'s is the item
+ * list; both data. */
+const TRANSPARENT_KEYWORDS = new Set([
+	"do",
+	"then",
+	"else",
+	"elif",
+	"if",
+	"while",
+	"until",
 ]);
+
+/** Wrappers whose only effect is to run what follows them, mapped to the
+ * flags that consume the next token as their value — so `env -u X gh …`
+ * and `nice -n 5 gh …` resolve to their command. Their remaining flags
+ * are bare; `timeout`'s value is positional and handled in the walk. */
+const WRAPPER_VALUE_FLAGS = new Map<string, Set<string>>([
+	["command", new Set<string>()],
+	["exec", new Set<string>(["-a"])],
+	[
+		"sudo",
+		new Set<string>([
+			"-u",
+			"--user",
+			"-g",
+			"--group",
+			"-p",
+			"--prompt",
+			"-C",
+			"--close-from",
+			"-R",
+			"--chroot",
+			"-T",
+			"--command-timeout",
+			"-D",
+			"--chdir",
+		]),
+	],
+	["doas", new Set<string>(["-u", "-C"])],
+	["nohup", new Set<string>()],
+	["nice", new Set<string>(["-n", "--adjustment"])],
+	["time", new Set<string>(["-o", "--output", "-f", "--format"])],
+	[
+		"env",
+		new Set<string>(["-u", "--unset", "-S", "--split-string", "-C", "--chdir"]),
+	],
+]);
+
+/** timeout flags that consume the next token as their value. */
+const TIMEOUT_VALUE_FLAGS = new Set(["-k", "--kill-after", "-s", "--signal"]);
+
+/** xargs flags that consume the next token as their value; its first
+ * remaining non-flag word is the command it runs. */
+const XARGS_VALUE_FLAGS = new Set([
+	"-n",
+	"--max-args",
+	"-s",
+	"--max-chars",
+	"-P",
+	"--max-procs",
+	"-I",
+	"-d",
+	"--delimiter",
+	"-E",
+	"-e",
+	"-L",
+	"-l",
+	"-a",
+	"--arg-file",
+]);
+
+/** Interpreters whose `-c` flag makes the next word command text. */
+const SHELL_INTERPRETERS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+
+/** Command substitution spans in one segment's raw text: `$()` and
+ * backticks — the shell executes their contents, even inside a
+ * double-quoted payload, so their text is command, never data. */
+const SUBSTITUTION = /\$\([^()]*\)|`[^`]*`/g;
+
+/** Recursion cap for substitution spans, which always shrink; belt and
+ * suspenders against pathological nesting. */
+const MAX_SCAN_DEPTH = 4;
 
 const SEGMENT_SPLIT = /&&|\|\||;|\||\n/;
 
@@ -110,25 +186,75 @@ function tokens(segment: string): string[] {
 		.filter((word) => word.length > 0);
 }
 
-/**
- * The word index of the segment's command: past leading `VAR=value`
- * assignments and wrapper commands (`sudo`, `env`, `timeout 10`, ...).
- */
-function commandIndex(words: string[]): number {
-	let i = 0;
-	while (i < words.length) {
-		const word = words[i];
-		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
-			i += 1;
-		} else if (word === "timeout" && /^\d/.test(words[i + 1] ?? "")) {
-			i += 2;
-		} else if (COMMAND_WRAPPERS.has(word)) {
-			i += 1;
-		} else {
-			return i;
-		}
+/** xargs's flags, skipped over; its first trailing non-flag is the
+ * command it runs (default `echo` when none). */
+function skipXargsFlags(words: string[], i: number): number {
+	while (i < words.length && words[i].startsWith("-")) {
+		i += XARGS_VALUE_FLAGS.has(words[i]) ? 2 : 1;
+	}
+	return i;
+}
+
+/** The word index after a shell interpreter's `-c` flag, or -1. */
+function shellDashCBody(words: string[], i: number): number {
+	while (i < words.length && /^-[A-Za-z]+$/.test(words[i])) {
+		if (words[i].includes("c")) return i + 1;
+		i += 1;
 	}
 	return -1;
+}
+
+/**
+ * Every word index in one segment where a command begins in command
+ * position: past `VAR=value` assignments, transparent loop keywords, and
+ * wrapper commands (consuming their flag values; `timeout`'s duration is
+ * its positional value). `xargs` spawns its trailing command position and
+ * a `sh -c` body spawns its own, so a composition that hides a command is
+ * still resolved.
+ */
+function commandStarts(words: string[]): number[] {
+	const starts: number[] = [];
+	const pending: number[] = [0];
+	while (pending.length > 0) {
+		let i = pending.shift() as number;
+		let atCommand = false;
+		while (i < words.length) {
+			const word = words[i];
+			if (
+				/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) ||
+				TRANSPARENT_KEYWORDS.has(word)
+			) {
+				i += 1;
+			} else if (word === "timeout") {
+				i += 1;
+				while (i < words.length && words[i].startsWith("-")) {
+					i += TIMEOUT_VALUE_FLAGS.has(words[i]) ? 2 : 1;
+				}
+				i += 1;
+			} else if (word === "command" && /^-[vV]$/.test(words[i + 1] ?? "")) {
+				break; // `command -v gh …` names a command, it runs none
+			} else if (WRAPPER_VALUE_FLAGS.has(word)) {
+				const valueFlags = WRAPPER_VALUE_FLAGS.get(word) as Set<string>;
+				i += 1;
+				while (i < words.length && words[i].startsWith("-")) {
+					i += valueFlags.has(words[i]) ? 2 : 1;
+				}
+			} else {
+				atCommand = true;
+				break;
+			}
+		}
+		if (!atCommand) continue;
+		starts.push(i);
+		const word = words[i];
+		if (word === "xargs") {
+			pending.push(skipXargsFlags(words, i + 1));
+		} else if (SHELL_INTERPRETERS.has(word)) {
+			const body = shellDashCBody(words, i + 1);
+			if (body !== -1) pending.push(body);
+		}
+	}
+	return starts;
 }
 
 /** Walk gh's global flags (consuming flag values) from word index `i`. */
@@ -142,17 +268,23 @@ function skipGhGlobalFlags(words: string[], i: number): number {
 /**
  * The gh subcommand of a segment whose command is `gh`: the first
  * subcommand slot after gh's global flags, one level deeper for `pr`.
- * Returns e.g. "pr merge", "api", "issue"; null when the segment runs out
- * before a subcommand appears.
+ * Returns the subcommand name (e.g. "pr merge", "api", "issue") and the
+ * index of its last word; null when the segment runs out before a
+ * subcommand appears.
  */
-function ghSubcommand(words: string[], gh: number): string | null {
+function ghSubcommand(
+	words: string[],
+	gh: number,
+): { name: string; end: number } | null {
 	let i = skipGhGlobalFlags(words, gh + 1);
 	const first = words[i];
 	if (first === undefined) return null;
-	if (first !== "pr") return first;
+	if (first !== "pr") return { name: first, end: i };
 	i = skipGhGlobalFlags(words, i + 1);
 	const second = words[i];
-	return second === undefined ? first : `${first} ${second}`;
+	return second === undefined
+		? { name: first, end: i - 1 }
+		: { name: `${first} ${second}`, end: i };
 }
 
 /**
@@ -350,26 +482,52 @@ function apiRefusal(segment: string): MergeRefusal | null {
 	return null;
 }
 
+/** The `$()`/backtick spans of one segment's raw text, unwrapped. */
+function substitutionSpans(segment: string): string[] {
+	return [...segment.matchAll(SUBSTITUTION)].map((m) =>
+		m[0].startsWith("$(") ? m[0].slice(2, -1) : m[0].slice(1, -1),
+	);
+}
+
 /**
- * One segment's refusal: the gh and API checks parse the segment's actual
- * command and subcommand, so a non-`gh` segment keeps the raw carrier rule
- * and a `gh` segment treats its flag payloads as data — scanned only when
- * the parsed subcommand is a network one. The push check stays a positional
- * walk that finds `git` anywhere in the segment.
+ * One segment's refusal, command-position-aware: the gh-pr-merge check
+ * runs at every position where a command actually begins — the segment's
+ * own command, `xargs`'s trailing command, a `sh -c` body — while flag
+ * payloads stay data. `$()`/backtick spans are command text and are
+ * scanned recursively. The API check keeps the raw carrier rule: fired
+ * for the segment's own `gh api`/`gh graphql` subcommand or any non-`gh`
+ * main command, passed for a `gh` segment whose parsed subcommand is
+ * neither — a comment body's URL is data. The push check stays a
+ * positional walk that finds `git` anywhere in the segment.
  */
-function segmentRefusal(words: string[], segment: string): MergeRefusal | null {
-	const cmd = commandIndex(words);
-	if (cmd !== -1 && words[cmd] === "gh") {
-		const sub = ghSubcommand(words, cmd);
-		if (sub === "pr merge") {
-			return { kind: "gh-pr-merge", matched: "gh pr merge" };
+function segmentRefusal(segment: string, depth: number): MergeRefusal | null {
+	const words = tokens(segment);
+	const starts = commandStarts(words);
+	for (const start of starts) {
+		if (words[start] !== "gh") continue;
+		const sub = ghSubcommand(words, start);
+		if (sub === null) continue;
+		if (sub.name === "pr merge") {
+			return {
+				kind: "gh-pr-merge",
+				matched: words.slice(start, sub.end + 1).join(" "),
+			};
 		}
-		if (sub === "api" || sub === "graphql") {
+		if (sub.name === "api" || sub.name === "graphql") {
 			return apiRefusal(segment);
 		}
-		return null;
 	}
-	return apiRefusal(segment);
+	if (depth < MAX_SCAN_DEPTH) {
+		for (const span of substitutionSpans(segment)) {
+			const refusal = segmentRefusal(span, depth + 1);
+			if (refusal) return refusal;
+		}
+	}
+	const main = starts[0];
+	if (main === undefined || words[main] !== "gh") {
+		return apiRefusal(segment);
+	}
+	return null;
 }
 
 export function inspectCommand(
@@ -378,7 +536,7 @@ export function inspectCommand(
 ): MergeRefusal | null {
 	for (const segment of command.split(SEGMENT_SPLIT)) {
 		const words = tokens(segment);
-		const refusal = segmentRefusal(words, segment);
+		const refusal = segmentRefusal(segment, 0);
 		if (refusal) return refusal;
 		if (pushIndex(words) !== -1) {
 			const push = pushRefusal(words, head ?? null);
