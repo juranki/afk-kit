@@ -5,7 +5,7 @@
  * agent definition (R2 + R5, ticket afk-kit #17).
  */
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -141,6 +141,72 @@ describe("the shipped implementer agent (R2 + R5, #17)", () => {
 		expect(body).toContain("gh");
 		expect(body).toContain("commit");
 		expect(body).toContain("open questions");
+	});
+});
+
+describe("package-relative roster loading (R2, #34)", () => {
+	// getAgentDir() honors PI_CODING_AGENT_DIR at call time; pointing it at a
+	// fresh directory empties the user layer and keeps the test hermetic.
+	let cleanUserDir: string;
+
+	beforeEach(() => {
+		cleanUserDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "subagent-package-roster-"),
+		);
+		process.env.PI_CODING_AGENT_DIR = cleanUserDir;
+	});
+
+	afterEach(() => {
+		delete process.env.PI_CODING_AGENT_DIR;
+	});
+
+	test("the shipped roster reaches discovery with no user or project agents", () => {
+		const { agents } = discoverAgents(projectDir, "user");
+		const names = agents.map((a) => a.name);
+		expect(names).toContain("implementer");
+		expect(names).toContain("reviewer");
+		for (const agent of agents) expect(agent.source).toBe("package");
+	});
+
+	test("the shipped implementer is confined and package-sourced", () => {
+		const { agents } = discoverAgents(projectDir, "user");
+		const implementer = agents.find((a) => a.name === "implementer");
+		expect(implementer?.confinement).toBe("implementer");
+		expect(implementer?.filePath).toContain(
+			path.join("extensions", "subagent", "agents"),
+		);
+	});
+
+	test("a user-level definition shadows the shipped one by name", () => {
+		fs.mkdirSync(path.join(cleanUserDir, "agents"), { recursive: true });
+		fs.writeFileSync(
+			path.join(cleanUserDir, "agents", "implementer.md"),
+			"---\nname: implementer\ndescription: local override\n---\n\nBody.\n",
+		);
+		const { agents } = discoverAgents(projectDir, "user");
+		const implementers = agents.filter((a) => a.name === "implementer");
+		expect(implementers).toHaveLength(1);
+		expect(implementers[0].source).toBe("user");
+		expect(implementers[0].description).toBe("local override");
+	});
+
+	test("project scope stays project-only: no package agents leak in", () => {
+		writeAgent("local", "name: local\ndescription: d");
+		const { agents } = discoverAgents(projectDir, "project");
+		expect(agents.map((a) => a.name)).toEqual(["local"]);
+	});
+
+	test("scope both layers user over package", () => {
+		fs.mkdirSync(path.join(cleanUserDir, "agents"), { recursive: true });
+		fs.writeFileSync(
+			path.join(cleanUserDir, "agents", "implementer.md"),
+			"---\nname: implementer\ndescription: local override\n---\n\nBody.\n",
+		);
+		const { agents } = discoverAgents(projectDir, "both");
+		const implementer = agents.find((a) => a.name === "implementer");
+		const reviewer = agents.find((a) => a.name === "reviewer");
+		expect(implementer?.source).toBe("user");
+		expect(reviewer?.source).toBe("package");
 	});
 });
 

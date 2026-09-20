@@ -660,7 +660,7 @@ export default function (pi: ExtensionAPI) {
 			'Recover the result later with {check: "<subagentId>"} (history: "full" for the whole stream); kill a stuck task with {cancel: "<subagentId>"}.',
 			"Every task is also bounded on its own: a wall-clock cap and a no-output watchdog kill a hung child.",
 			"Agents whose frontmatter carries a confinement field spawn confined (R5): env allowlist + pinned gitconfig, a PATH shim refusing gh and git push; their CONFINEMENT_REFUSAL stderr lines come back as a refusals field — report lines, not errors.",
-			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
+			`Default agent scope is "user": the shipped package roster (R2) plus ${path.join(getAgentDir(), "agents")}.`,
 			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
 		].join(" "),
 		parameters: SubagentParams,

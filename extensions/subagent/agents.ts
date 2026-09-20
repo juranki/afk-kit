@@ -4,6 +4,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
 	CONFIG_DIR_NAME,
@@ -27,7 +28,12 @@ export interface AgentConfig {
 	 */
 	confinement?: string;
 	systemPrompt: string;
-	source: "user" | "project";
+	/**
+	 * Where the definition was read from. `package` is the shipped roster
+	 * inside the installed afk-kit package (#34); `user` and `project` are
+	 * pi's agent directories, which shadow it by name.
+	 */
+	source: "user" | "project" | "package";
 	filePath: string;
 }
 
@@ -106,7 +112,7 @@ function parseToolList(value: unknown): string[] | undefined {
 
 function loadAgentsFromDir(
 	dir: string,
-	source: "user" | "project",
+	source: "user" | "project" | "package",
 ): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
@@ -183,6 +189,18 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 	}
 }
 
+/**
+ * The shipped roster's directory, resolved package-relatively (R2, #34). pi's
+ * manifest has no `agents` resource, so the definitions ride inside the
+ * package as plain files and discovery reads them relative to this module —
+ * a path that resolves correctly under every install location (user-level
+ * git clone, local-path reference, npm copy).
+ */
+const packageAgentsDir = path.join(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"agents",
+);
+
 export function discoverAgents(
 	cwd: string,
 	scope: AgentScope,
@@ -190,19 +208,28 @@ export function discoverAgents(
 	const userDir = path.join(getAgentDir(), "agents");
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 
-	const userAgents =
-		scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
+	// The shipped package roster rides wherever user agents ride (#34): it is
+	// the user-level default roster, not a project-local surface, so the
+	// project-only scope excludes it along with the user directory.
+	const withUserRoster = scope === "user" || scope === "both";
+	const packageAgents = withUserRoster
+		? loadAgentsFromDir(packageAgentsDir, "package")
+		: [];
+	const userAgents = withUserRoster ? loadAgentsFromDir(userDir, "user") : [];
 	const projectAgents =
 		scope === "user" || !projectAgentsDir
 			? []
 			: loadAgentsFromDir(projectAgentsDir, "project");
 
+	// Precedence, most specific wins: project shadows user shadows package.
 	const agentMap = new Map<string, AgentConfig>();
 
 	if (scope === "both") {
+		for (const agent of packageAgents) agentMap.set(agent.name, agent);
 		for (const agent of userAgents) agentMap.set(agent.name, agent);
 		for (const agent of projectAgents) agentMap.set(agent.name, agent);
 	} else if (scope === "user") {
+		for (const agent of packageAgents) agentMap.set(agent.name, agent);
 		for (const agent of userAgents) agentMap.set(agent.name, agent);
 	} else {
 		for (const agent of projectAgents) agentMap.set(agent.name, agent);

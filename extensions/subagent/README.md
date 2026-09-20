@@ -91,6 +91,15 @@ Delegate tasks to specialized subagents with isolated context windows.
 >   is **not confined** and is handed the pushed diff in its task text (map
 >   review 2026-09-19), so it needs no `gh`. An unparseable verdict escalates
 >   like any other failure (ADR 0007).
+> - **Package-relative roster loading (#34)** — pi's manifest has no
+>   `agents` resource, so the shipped definitions ride inside the package as
+>   plain files and `discoverAgents` reads them relative to this module
+>   (`import.meta.url`), which resolves under every install location. The
+>   package roster is the user-level **default layer**: user- and
+>   project-level definitions shadow it by name (project > user > package),
+>   and the project-only scope excludes it along with the user directory. No
+>   hand-copying to `~/.pi/agent/agents/` is needed to dispatch the shipped
+>   `implementer`/`reviewer` from a fresh install.
 
 ## Features
 
@@ -152,7 +161,9 @@ This tool executes a separate `pi` subprocess with a delegated system prompt and
 
 **Project-local agents** (`.pi/agents/*.md`) are repo-controlled prompts that can instruct the model to read files, run bash commands, etc.
 
-**Default behavior:** Only loads **user-level agents** from `~/.pi/agent/agents`.
+**Default behavior:** Loads the **shipped package roster** (this directory's
+`agents/`, resolved package-relatively) plus **user-level agents** from
+`~/.pi/agent/agents` (which shadow the shipped ones by name).
 
 To enable project-local agents, pass `agentScope: "both"` (or `"project"`). Only do this for repositories you trust.
 
@@ -237,10 +248,11 @@ When `model` is omitted, the subagent inherits the dispatching session's active 
 A non-empty `confinement` field spawns the agent confined (R5): env allowlist + pinned gitconfig, and a PATH shim refusing `gh` and `git push`. The value names the confinement profile; one profile ships, so any non-empty value gets it — a typo over-confines rather than under-confines. The agent's `CONFINEMENT_REFUSAL` stderr lines come back as a `refusals` field on the structured result.
 
 **Locations:**
-- `~/.pi/agent/agents/*.md` - User-level (always loaded)
-- `.pi/agents/*.md` - Project-level (only with `agentScope: "project"` or `"both"`)
+- `agents/*.md` next to `agents.ts` in the installed package - Shipped default roster (#34)
+- `~/.pi/agent/agents/*.md` - User-level (shadows the shipped roster by name)
+- `.pi/agents/*.md` - Project-level (only with `agentScope: "project"` or `"both"`; shadows user and shipped)
 
-Project agents override user agents with the same name when `agentScope: "both"`.
+Precedence, most specific wins: project > user > shipped package.
 
 ## Sample Agents
 
