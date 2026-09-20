@@ -182,14 +182,10 @@ export async function claimIssue(
 		{
 			name: "verify the sole claim",
 			action: async () => {
-				const assignees = await ghJson<{ login: string }[]>(seams.gh, [
-					"issue",
-					"view",
-					String(issue),
-					"--json",
-					"assignees",
-				]);
-				const rivals = assignees
+				const view = await ghJson<{
+					assignees: { login: string }[];
+				}>(seams.gh, ["issue", "view", String(issue), "--json", "assignees"]);
+				const rivals = view.assignees
 					.map((a) => a.login)
 					.filter((login) => login !== facts.maintainer);
 				if (rivals.length > 0) {

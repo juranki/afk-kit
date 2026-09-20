@@ -347,7 +347,7 @@ describe("claimIssue", () => {
 		const world = await makeWorld(7, [
 			{
 				args: ["issue", "view", "7", "--json", "assignees"],
-				json: [{ login: "maintainer" }, { login: "rival" }],
+				json: { assignees: [{ login: "maintainer" }, { login: "rival" }] },
 			},
 			{
 				args: ["issue", "edit", "7", "--remove-assignee", "maintainer"],
