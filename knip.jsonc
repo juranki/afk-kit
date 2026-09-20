@@ -10,5 +10,10 @@
 	// agents.ts, and README.md out of the vendored tree, so the whole-directory
 	// ignore shrank to the still-unmodified vendored files.
 	"$schema": "./node_modules/knip/schema.json",
-	"entry": ["extensions/subagent/index.ts", "extensions/subagent/**/*.test.ts"]
+	"entry": [
+		"extensions/subagent/index.ts",
+		"extensions/readiness/index.ts",
+		"extensions/subagent/**/*.test.ts",
+		"extensions/readiness/**/*.test.ts"
+	]
 }

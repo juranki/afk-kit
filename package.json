@@ -15,7 +15,8 @@
 	},
 	"pi": {
 		"extensions": [
-			"./extensions/subagent/index.ts"
+			"./extensions/subagent/index.ts",
+			"./extensions/readiness/index.ts"
 		],
 		"prompts": [
 			"./extensions/subagent/prompts"
