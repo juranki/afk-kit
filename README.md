@@ -15,7 +15,8 @@ attention only where it is decisive: a human **starts** each piece of work and
    [planning playbook](docs/playbooks/planning-session.md).
 2. **Coordinator session** (one per issue, on explicit command): runs a readiness
    check, *claims* the ticket, creates a worktree + branch, then delegates. See the
-   [coordinator playbook](docs/playbooks/coordinator-session.md).
+   [coordinator playbook](docs/playbooks/coordinator-session.md); its shipped runtime
+   form is the [`coordinator` skill](skills/coordinator/SKILL.md).
    - an **implementer** subagent (cheap `flash` model) writes and verifies the change —
      it can commit locally but is *confined*: it cannot push, run `gh`, or publish;
    - the coordinator pushes and opens a pull request;
@@ -33,11 +34,12 @@ The vocabulary and invariants of this workflow live in the
 | --- | --- |
 | [`system-intent/`](system-intent/) | Model frame: the [Agent Delivery Workflow ontology](system-intent/ontologies/agent-delivery-workflow.md) (terms + invariants), fictional characters, and user stories that pressure-test the design |
 | [`docs/`](docs/) | 13 ADRs, playbooks (planning/coordinator sessions), conventions (issue lifecycle, branching, review/escalation, code-verify) |
+| [`skills/`](skills/) | The shipped judgment: the `coordinator` skill, the coordinator playbook's runtime form ([ADR 0013](docs/adr/0013-coordinator-skill-carries-judgment-agentic-drift-review.md)) |
 | [`extensions/subagent/`](extensions/subagent/) | The code: a [vendored, hardened fork](VENDORED.md) of pi's `subagent` example extension (~4.2k lines TS) — non-blocking dispatch with wait/check, cancel, wall-clock caps, hang watchdogs, implementer confinement (env allowlist + git config pin + PATH shim), verdict parsing |
 | [`prototype/`](prototype/), [`scripts/`](scripts/) | Throwaway prototypes and live smoke tests |
 
-**Stack:** TypeScript on **Bun**, packaged as a pi-package (extension + prompt
-templates), linted with Biome, dead-code-checked with Knip. POSIX-only.
+**Stack:** TypeScript on **Bun**, packaged as a pi-package (extensions, skills, and
+prompt templates), linted with Biome, dead-code-checked with Knip. POSIX-only.
 
 **Design philosophy:** extensions enforce *mechanics* (readiness checks, confinement,
 claims), skills carry *judgment*; confinement stops *accidents*, not adversaries — the

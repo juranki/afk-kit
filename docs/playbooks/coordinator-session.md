@@ -56,3 +56,15 @@ Any repeated failure, exhausted round, or undecided blocker goes through
 [review and escalation](../conventions/review-and-escalation.md): status comment, label
 correction, worktree preserved, maintainer informed. A coordinator never silently
 abandons a ticket.
+
+## Runtime form
+
+The shipped form of this playbook is the `coordinator` skill
+([`skills/coordinator/SKILL.md`](../../skills/coordinator/SKILL.md)): it carries the
+commands, the loop's shape, the hard rules, the coordinator-side caps, the escalation
+procedure, and the stop condition as self-contained judgment text, and delegates every
+mechanical step to the toolkit's extension tools. These docs stay canonical for humans;
+the skill is their runtime form, not their replacement, and the agentic drift review in
+`bun run verify` refuses a skill that disagrees with them ([ADR
+0013](../adr/0013-coordinator-skill-carries-judgment-agentic-drift-review.md)). Edit
+this playbook first, then reconcile the skill.
