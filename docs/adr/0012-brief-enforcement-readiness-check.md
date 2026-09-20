@@ -28,7 +28,14 @@ split: judgment stays prompt-side — whether acceptance criteria are truly
 verifiable, whether the summary speaks the domain vocabulary, owned by the
 planning skills and the reviewer — while mechanics become code. A planning session
 runs the check before applying `ready-for-agent`; only a passing result may apply
-the label. A coordinator's loop step 1 runs it and refuses with a structured
+the label. *Amended 2026-09-20 ([#24](https://github.com/juranki/afk-kit/issues/24)):*
+because the triage-label inspection requires `ready-for-agent` present, the planning
+run happens **around** applying the label, in two runs: a pre-apply run must pass
+every inspection except at most `triage-labels` failing as `ready-for-agent` absent;
+the session then applies the label, and a confirm run passing all inspections is the
+exit proof — a failed confirm run removes the label and sends the ticket back. The
+label's brief inconsistency between the runs harms nothing: nothing consumes it
+except a claim, and every claim re-checks. A coordinator's loop step 1 runs it and refuses with a structured
 `READINESS_REFUSAL` naming the failed inspections, leaving one comment on the
 issue as the fix-trigger; it does not relabel — correcting the label belongs to
 the planning session or the maintainer, and the harm of a briefly lying label is

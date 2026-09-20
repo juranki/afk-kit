@@ -40,7 +40,7 @@ export default function (pi: ExtensionAPI) {
 			"the `ready-for-agent` label present with no competing triage state, and Blocked by agreeing with the tracker's",
 			"native dependencies (named tickets that have since closed are ignored).",
 			"Returns a structured pass/fail with a per-inspection result; a failing run carries `READINESS_REFUSAL` naming the failed inspections.",
-			"Planning sessions run it before a ticket carries `ready-for-agent` (the triage-labels inspection fails until the label is applied — apply, run, remove and fix on failure);",
+			"Planning sessions run it around applying the label: a pre-apply run may fail only `triage-labels`, as ready-for-agent absent; after applying, a confirm run passing all inspections is the exit proof (any other failure — remove the label, fix, run again);",
 			"a coordinator's step 1 and the atomic claim refuse on it. Structural only: brief quality stays with planning and the reviewer.",
 		].join(" "),
 		parameters: Type.Object({
