@@ -37,8 +37,39 @@ in-progress | in-review ──escalation──▶ needs-info | ready-for-agent
 - The claim is atomic: **assign the issue to the maintainer account and apply
   `in-progress` together**. An issue with an assignee and `in-progress` is claimed and
   is no longer claimable.
+- The maintainer account is the **authenticated `gh` user** of the session running the
+  claim.
 - Only a coordinator claims, and only from the claimable, and only on a
   maintainer's command.
+
+## Claim and publish refusals
+
+The claim and publish ops (the coordinator mechanics extension) enforce these
+semantics as code; their refusals use the house marker pattern. Canonical
+marker vocabulary:
+
+- `READINESS_REFUSAL` — the embedded readiness check failed; the claim refuses,
+  claiming nothing ([ADR 0012](../adr/0012-brief-enforcement-readiness-check.md)).
+- `CLAIM_REFUSAL` — the issue is already claimed (an assignee, or a leftover
+  `in-progress` marker with no assignee), a competing claim appeared mid-claim, a
+  step failed, or compensation itself failed. Compensation failures name the
+  **leftover state** explicitly (e.g. `assigned to <maintainer>`, `labeled
+  in-progress`, `worktree <path> / branch <branch>`); a maintainer clears it.
+- `PUBLISH_REFUSAL` — the branch already has an open PR (named), a verify command
+  failed in the worktree (named, nothing pushed), a step failed, or compensation
+  itself failed.
+
+Discipline, identical for both ops:
+
+- Steps run in order; **failure at any step compensates the steps before it**, in
+  reverse order, leaving no half-claim and no half-published PR.
+- A publish compensation closes the just-opened PR (with a comment saying so) and
+  deletes the pushed remote branch.
+- The claim order is: assign → verify the sole claim → apply `in-progress` → create
+  the worktree and branch from `main`.
+- The publish order is: verify commands → push → open the PR (review requested from
+  the maintainer) → apply `in-review` → remove `in-progress` (applied first, removed
+  second, so the issue is never momentarily unlabeled while a PR is open).
 
 ## Who may move what
 
