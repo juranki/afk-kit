@@ -57,3 +57,25 @@ grep -o "Use the subagent tool with the chain parameter[^\"]*" /tmp/afk-kit-prob
 Expected: the session records the expanded template body, not the literal
 `/scout-and-plan` — prompt templates load from the manifest and expand. (`-nt` keeps
 the model tool-less so nothing actually dispatches.)
+
+## 5. Shipped roster loads package-relatively (#34)
+
+pi's manifest has no `agents` resource; discovery reads the package's own
+`extensions/subagent/agents/` (project > user > package precedence). From a
+clean environment — a fresh `PI_CODING_AGENT_DIR` with only the credentials
+copied in, no hand-copied agents — the shipped `implementer` must dispatch
+with no fixture:
+
+```bash
+export CLEAN_PI=$(mktemp -d)
+cp ~/.pi/agent/{auth.json,models.json} "$CLEAN_PI/"   # credentials only, no agents
+PI_CODING_AGENT_DIR="$CLEAN_PI" pi install /home/sprite/afk-kit
+mkdir -p /tmp/afk-kit-roster && cd /tmp/afk-kit-roster
+PI_CODING_AGENT_DIR="$CLEAN_PI" pi -p --no-session "Call the subagent tool exactly once with: agent=implementer, task='Report your git branch and nothing else.' Then report the subagent's final output verbatim and nothing else."
+```
+
+Expected: the child runs the shipped `implementer` (confined, glm-5.3-flash)
+without any agent hand-copied into `$CLEAN_PI/agents` — proof the roster
+reaches the fork's `discoverAgents` from the installed package. A user-level
+`~/.pi/agent/agents/implementer.md` shadows the shipped one by name, which is
+the intended override path, not a workaround.
