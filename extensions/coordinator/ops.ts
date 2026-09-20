@@ -346,6 +346,24 @@ export async function publishPr(
 	}
 	const issue = Number(match[1]);
 
+	// A PR with no commits ahead of main cannot be opened; refuse before
+	// anything is pushed.
+	const ahead = await seams.git(["rev-list", "--count", "main..HEAD"], worktree);
+	if (ahead.exitCode !== 0) {
+		return publishRefusal(
+			worktree,
+			`count the commits ahead of main: ${ahead.stderr.trim()}`,
+		);
+	}
+	if (ahead.stdout.trim() === "0") {
+		return publishRefusal(
+			worktree,
+			`${branch} has no commits ahead of main — nothing to publish`,
+			issue,
+			branch,
+		);
+	}
+
 	const maintainer = await ghJson<{ login: string }>(seams.gh, [
 		"api",
 		"user",

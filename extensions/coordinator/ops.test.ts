@@ -555,6 +555,24 @@ describe("publishPr", () => {
 		}
 	});
 
+	test("refuses a branch with no commits ahead of main, before pushing", async () => {
+		const world = await makeWorld(7, baseRules());
+		try {
+			const worktree = path.join(world.worktreeRoot, "remote", BRANCH);
+			await world.git(["worktree", "add", "-b", BRANCH, worktree, "main"]);
+			const outcome = await publishPr(
+				{ worktree, summary: SUMMARY },
+				world.seams,
+			);
+			expect(outcome.ok).toBe(false);
+			expect(outcome.text).toContain("PUBLISH_REFUSAL");
+			expect(outcome.text).toContain("no commits ahead of main");
+			expect(await lsRemote(world)).toBe("");
+		} finally {
+			cleanupWorld(world);
+		}
+	});
+
 	test("refuses an issue whose branch already has an open PR", async () => {
 		const world = await makeWorld(7, [
 			{
