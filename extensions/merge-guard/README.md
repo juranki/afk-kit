@@ -87,7 +87,16 @@ goes out of its way, and the bypasses are documented, not hidden:
   scanned only when the segment's parsed subcommand is
   `gh api`/`gh graphql`, or a non-`gh` segment carries a network carrier
   — so a URL pasted into a non-`gh` command's payload can still refuse,
-  the residue of the string-level class.
+  the residue of the string-level class. The flag tables those parses
+  walk are hand-maintained, so the gh/API checks fail closed on the
+  unknown (#36): a flag the guard does not recognize, anywhere before
+  the parsed subcommand, marks the segment's resolution ambiguous and
+  the ambiguity zone gets the raw fragment scan back — flag-decorated
+  merge, merge-endpoint, and push-to-`main` spellings refuse even though
+  they parsed to nothing. The cost is the mirror image of the push
+  check's: an unrecognized flag plus quoted merge vocabulary in the same
+  gh segment can false-refuse; rephrase by moving flags after the
+  subcommand or attaching values with `=` (for example `--template=tpl`).
 
 Enforcement costs the maintainer in-session merges and direct-to-`main`
 pushes for as long as afk-kit is installed — that is the point. Server-side

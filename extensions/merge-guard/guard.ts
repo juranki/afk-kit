@@ -13,10 +13,18 @@
  * command; a `sh -c` body; and `$()`/backtick spans, which the shell
  * itself executes — so composition cannot hide an invocation, while
  * merge vocabulary in payload position (a comment body, a commit
- * message, an inline script) stays data, never command. The API check
- * keeps the raw carrier rule: endpoint fragments are scanned only when
- * the segment's parsed subcommand is `gh api`/`gh graphql` or a non-`gh`
- * segment carries a network carrier (the API host, any URL).
+ * message, an inline script) stays data, never command. The flag walks
+ * fail closed on the unknown (#36): `skipFlags` consumes a value only
+ * for tabled value flags and marks any unrecognized flag ambiguous, and
+ * an ambiguous segment additionally gets the raw fragment scan confined
+ * to it — a flag-decorated merge subcommand, merge endpoint, or push to
+ * `main` refuses even when the parse resolved to nothing, at the
+ * documented cost of false-refusing merge vocabulary quoted in the same
+ * ambiguous segment (README.md). The API check keeps the raw carrier
+ * rule: endpoint fragments are scanned only when the segment's parsed
+ * subcommand is `gh api`/`gh graphql` (or its ambiguous-zone evidence
+ * finds those subcommand words) or a non-`gh` segment carries a network
+ * carrier (the API host, any URL).
  *
  * The strength bar is ADR 0011's, stated honestly: airtight within a loaded
  * session at accident level, not adversarially — the documented bypass is
@@ -186,13 +194,36 @@ function tokens(segment: string): string[] {
 		.filter((word) => word.length > 0);
 }
 
-/** xargs's flags, skipped over; its first trailing non-flag is the
- * command it runs (default `echo` when none). */
-function skipXargsFlags(words: string[], i: number): number {
+/**
+ * Walk flags from word index `i`, consuming the next token for flags in
+ * `valueFlags`. A flag outside the table is walked past but marks the
+ * walk `ambiguous`: the guard cannot know whether it consumes a value,
+ * so the position this walk resolves is untrusted and its callers must
+ * fail closed (the ambiguity fallbacks in `segmentRefusal` and
+ * `inspectCommand`).
+ */
+function skipFlags(
+	words: string[],
+	i: number,
+	valueFlags: Set<string>,
+): { index: number; ambiguous: boolean } {
+	let ambiguous = false;
 	while (i < words.length && words[i].startsWith("-")) {
-		i += XARGS_VALUE_FLAGS.has(words[i]) ? 2 : 1;
+		if (valueFlags.has(words[i])) {
+			i += 2;
+		} else {
+			ambiguous = true;
+			i += 1;
+		}
 	}
-	return i;
+	return { index: i, ambiguous };
+}
+
+/** xargs's flags, skipped over; its first trailing non-flag is the
+ * command it runs (default `echo` when none). xargs spawns a separate
+ * command position, so its own flag ambiguity is not propagated. */
+function skipXargsFlags(words: string[], i: number): number {
+	return skipFlags(words, i, XARGS_VALUE_FLAGS).index;
 }
 
 /** The word index after a shell interpreter's `-c` flag, or -1. */
@@ -210,11 +241,17 @@ function shellDashCBody(words: string[], i: number): number {
  * wrapper commands (consuming their flag values; `timeout`'s duration is
  * its positional value). `xargs` spawns its trailing command position and
  * a `sh -c` body spawns its own, so a composition that hides a command is
- * still resolved.
+ * still resolved. A wrapper or timeout flag walk that met an unrecognized
+ * flag marks the resolved command positions `ambiguous` — an unknown flag
+ * may have swallowed the real command.
  */
-function commandStarts(words: string[]): number[] {
+function commandStarts(words: string[]): {
+	starts: number[];
+	ambiguous: boolean;
+} {
 	const starts: number[] = [];
 	const pending: number[] = [0];
+	let ambiguous = false;
 	while (pending.length > 0) {
 		let i = pending.shift() as number;
 		let atCommand = false;
@@ -227,18 +264,17 @@ function commandStarts(words: string[]): number[] {
 				i += 1;
 			} else if (word === "timeout") {
 				i += 1;
-				while (i < words.length && words[i].startsWith("-")) {
-					i += TIMEOUT_VALUE_FLAGS.has(words[i]) ? 2 : 1;
-				}
-				i += 1;
+				const flags = skipFlags(words, i, TIMEOUT_VALUE_FLAGS);
+				if (flags.ambiguous) ambiguous = true;
+				i = flags.index + 1;
 			} else if (word === "command" && /^-[vV]$/.test(words[i + 1] ?? "")) {
 				break; // `command -v gh …` names a command, it runs none
 			} else if (WRAPPER_VALUE_FLAGS.has(word)) {
 				const valueFlags = WRAPPER_VALUE_FLAGS.get(word) as Set<string>;
 				i += 1;
-				while (i < words.length && words[i].startsWith("-")) {
-					i += valueFlags.has(words[i]) ? 2 : 1;
-				}
+				const flags = skipFlags(words, i, valueFlags);
+				if (flags.ambiguous) ambiguous = true;
+				i = flags.index;
 			} else {
 				atCommand = true;
 				break;
@@ -254,56 +290,64 @@ function commandStarts(words: string[]): number[] {
 			if (body !== -1) pending.push(body);
 		}
 	}
-	return starts;
+	return { starts, ambiguous };
 }
 
 /** Walk gh's global flags (consuming flag values) from word index `i`. */
-function skipGhGlobalFlags(words: string[], i: number): number {
-	while (i < words.length && words[i].startsWith("-")) {
-		i += GH_GLOBAL_VALUE_FLAGS.has(words[i]) ? 2 : 1;
-	}
-	return i;
+function skipGhGlobalFlags(
+	words: string[],
+	i: number,
+): { index: number; ambiguous: boolean } {
+	return skipFlags(words, i, GH_GLOBAL_VALUE_FLAGS);
 }
 
 /**
  * The gh subcommand of a segment whose command is `gh`: the first
  * subcommand slot after gh's global flags, one level deeper for `pr`.
- * Returns the subcommand name (e.g. "pr merge", "api", "issue") and the
- * index of its last word; null when the segment runs out before a
+ * Returns the subcommand name (e.g. "pr merge", "api", "issue"), the
+ * index of its last word, and whether either global-flag walk met an
+ * unrecognized flag — an unknown flag may consume a value, so the
+ * resolved slot is untrusted; null when the segment runs out before a
  * subcommand appears.
  */
 function ghSubcommand(
 	words: string[],
 	gh: number,
-): { name: string; end: number } | null {
-	let i = skipGhGlobalFlags(words, gh + 1);
-	const first = words[i];
-	if (first === undefined) return null;
-	if (first !== "pr") return { name: first, end: i };
-	i = skipGhGlobalFlags(words, i + 1);
-	const second = words[i];
-	return second === undefined
-		? { name: first, end: i - 1 }
-		: { name: `${first} ${second}`, end: i };
+): { name: string; end: number; ambiguous: boolean } | null {
+	const first = skipGhGlobalFlags(words, gh + 1);
+	const name1 = words[first.index];
+	if (name1 === undefined) return null;
+	if (name1 !== "pr") {
+		return { name: name1, end: first.index, ambiguous: first.ambiguous };
+	}
+	const second = skipGhGlobalFlags(words, first.index + 1);
+	const name2 = words[second.index];
+	const ambiguous = first.ambiguous || second.ambiguous;
+	return name2 === undefined
+		? { name: name1, end: second.index - 1, ambiguous }
+		: { name: `${name1} ${name2}`, end: second.index, ambiguous };
 }
 
 /**
  * The word index of the `push` subcommand in one command segment, or -1.
  * Finds a `git` token and walks its global flags (consuming flag values) to
  * the subcommand slot; anything else there means this segment is not a push.
+ * `ambiguous` reports an unrecognized flag on the resolving walk: the flag
+ * may have swallowed the real subcommand or shifted the slot, so a `-1`
+ * cannot be trusted as "no push", and a found slot may not be the whole
+ * story.
  */
-function pushIndex(words: string[]): number {
+function pushIndex(words: string[]): { index: number; ambiguous: boolean } {
 	for (let i = 0; i < words.length; i++) {
 		if (words[i] !== "git") continue;
-		let j = i + 1;
-		while (j < words.length) {
-			const word = words[j];
-			if (!word.startsWith("-")) return word === "push" ? j : -1;
-			if (GLOBAL_VALUE_FLAGS.has(word)) j += 2;
-			else j += 1;
-		}
+		const walk = skipFlags(words, i + 1, GLOBAL_VALUE_FLAGS);
+		const slot = words[walk.index];
+		if (slot === undefined) continue;
+		return slot === "push"
+			? { index: walk.index, ambiguous: walk.ambiguous }
+			: { index: -1, ambiguous: walk.ambiguous };
 	}
-	return -1;
+	return { index: -1, ambiguous: false };
 }
 
 interface PushInvocation {
@@ -393,14 +437,21 @@ function refspecTargetsMain(refspec: string): string | null {
 /**
  * True when the command contains a `git push` whose verdict depends on the
  * current branch, which the caller must resolve with git: a bare push (with
- * or without an explicit repository) or a bare `HEAD` refspec.
+ * or without an explicit repository), a bare `HEAD` refspec, or an
+ * ambiguous git push — unrecognized flags in the walk — with no explicit
+ * main evidence, whose real subcommand cannot be parsed at all.
  */
 export function needsHead(command: string): boolean {
 	for (const segment of command.split(SEGMENT_SPLIT)) {
 		const words = tokens(segment);
 		const push = pushIndex(words);
-		if (push === -1) continue;
-		const invocation = parsePush(words, push);
+		if (push.ambiguous) {
+			const token = pushToken(words);
+			if (token !== null && !pushMainEvidence(words, token)) return true;
+			continue;
+		}
+		if (push.index === -1) continue;
+		const invocation = parsePush(words, push.index);
 		if (invocation.all || invocation.mirror) continue;
 		if (invocation.positionals.length === 0) return true;
 		if (invocation.positionals.length === 1) return true;
@@ -414,9 +465,8 @@ export function needsHead(command: string): boolean {
 function pushRefusal(
 	words: string[],
 	head: string | null,
+	push: number,
 ): MergeRefusal | null {
-	const push = pushIndex(words);
-	if (push === -1) return null;
 	const invocation = parsePush(words, push);
 	if (invocation.all || invocation.mirror) {
 		return {
@@ -463,13 +513,11 @@ function pushRefusal(
 }
 
 /**
- * The merge-endpoint scan for one segment, governed by the raw carrier
- * rule: the fragment refuses only when the segment also carries a network
- * carrier (gh api/graphql named as words, the GitHub API host, any URL),
- * so grepping docs for these strings passes.
+ * The merge-endpoint patterns over one segment's raw text, without the
+ * carrier gate — shared by `apiRefusal` and the ambiguity fallback (whose
+ * gh-plus-api/graphql token evidence has already established the call).
  */
-function apiRefusal(segment: string): MergeRefusal | null {
-	if (!NETWORK_CARRIER.test(segment)) return null;
+function apiEndpointRefusal(segment: string): MergeRefusal | null {
 	const endpoint =
 		PR_MERGE_ENDPOINT.exec(segment) ?? GRAPHQL_PR_MERGE.exec(segment);
 	if (endpoint) {
@@ -478,6 +526,84 @@ function apiRefusal(segment: string): MergeRefusal | null {
 	const branchMerge = BRANCH_MERGE_ENDPOINT.exec(segment);
 	if (branchMerge && BRANCH_MERGE_BASE_MAIN.test(segment)) {
 		return { kind: "merge-api", matched: branchMerge[0] };
+	}
+	return null;
+}
+
+/**
+ * The merge-endpoint scan for one segment, governed by the raw carrier
+ * rule: the fragment refuses only when the segment also carries a network
+ * carrier (gh api/graphql named as words, the GitHub API host, any URL),
+ * so grepping docs for these strings passes.
+ */
+function apiRefusal(segment: string): MergeRefusal | null {
+	if (!NETWORK_CARRIER.test(segment)) return null;
+	return apiEndpointRefusal(segment);
+}
+
+/** Loose gh-pr-merge evidence in an ambiguous segment: `gh`, then `pr`,
+ * then `merge` — in that order, not necessarily adjacent. */
+function mergeEvidence(words: string[]): boolean {
+	let gh = false;
+	let pr = false;
+	for (const word of words) {
+		if (word === "gh") gh = true;
+		else if (gh && word === "pr") pr = true;
+		else if (pr && word === "merge") return true;
+	}
+	return false;
+}
+
+/** Loose api evidence in an ambiguous segment: `gh` plus an `api` or
+ * `graphql` word — the parsed subcommand slot cannot be trusted, so the
+ * segment may be a gh API call. */
+function apiEvidence(words: string[]): boolean {
+	let gh = false;
+	for (const word of words) {
+		if (word === "gh") gh = true;
+		else if (gh && (word === "api" || word === "graphql")) return true;
+	}
+	return false;
+}
+
+/** The `push` token following a `git` token, for the ambiguity fallback's
+ * loose push evidence, or null. */
+function pushToken(words: string[]): number | null {
+	let git = false;
+	for (let i = 0; i < words.length; i++) {
+		if (words[i] === "git") git = true;
+		else if (git && words[i] === "push") return i;
+	}
+	return null;
+}
+
+/** Loose push-to-main evidence after a `push` token: `--all`/`--mirror`,
+ * or any non-flag token whose refspec normalizes to `main`. */
+function pushMainEvidence(words: string[], push: number): boolean {
+	for (let i = push + 1; i < words.length; i++) {
+		const word = words[i];
+		if (word === "--all" || word === "--mirror") return true;
+		if (!word.startsWith("-") && refspecTargetsMain(word) !== null) return true;
+	}
+	return false;
+}
+
+/** The ambiguity-zone push fallback for one segment: with `git` and
+ * `push` tokens present, refuse on `--all`/`--mirror` or a main evidence
+ * token; without main evidence the resolved current branch decides, and
+ * a failed resolution stays a pass — the guard refuses only what it can
+ * name. */
+function ambiguousPushRefusal(
+	words: string[],
+	head: string | null,
+): MergeRefusal | null {
+	const push = pushToken(words);
+	if (push === null) return null;
+	if (pushMainEvidence(words, push) || head === "main") {
+		return {
+			kind: "push-to-main",
+			matched: "git push behind unrecognized flags",
+		};
 	}
 	return null;
 }
@@ -498,15 +624,22 @@ function substitutionSpans(segment: string): string[] {
  * for the segment's own `gh api`/`gh graphql` subcommand or any non-`gh`
  * main command, passed for a `gh` segment whose parsed subcommand is
  * neither — a comment body's URL is data. The push check stays a
- * positional walk that finds `git` anywhere in the segment.
+ * positional walk that finds `git` anywhere in the segment. Fail closed
+ * on the unknown (#36): a flag walk that met an unrecognized flag marks
+ * the segment's resolution ambiguous, and an ambiguous segment
+ * additionally gets the raw fragment scan confined to it — merge
+ * evidence (gh, then pr, then merge) refuses, and gh api/graphql
+ * evidence runs the endpoint patterns.
  */
 function segmentRefusal(segment: string, depth: number): MergeRefusal | null {
 	const words = tokens(segment);
-	const starts = commandStarts(words);
-	for (const start of starts) {
+	const resolution = commandStarts(words);
+	let ambiguous = resolution.ambiguous;
+	for (const start of resolution.starts) {
 		if (words[start] !== "gh") continue;
 		const sub = ghSubcommand(words, start);
 		if (sub === null) continue;
+		if (sub.ambiguous) ambiguous = true;
 		if (sub.name === "pr merge") {
 			return {
 				kind: "gh-pr-merge",
@@ -517,13 +650,25 @@ function segmentRefusal(segment: string, depth: number): MergeRefusal | null {
 			return apiRefusal(segment);
 		}
 	}
+	if (ambiguous) {
+		if (mergeEvidence(words)) {
+			return {
+				kind: "gh-pr-merge",
+				matched: "pr merge behind unrecognized flags",
+			};
+		}
+		if (apiEvidence(words)) {
+			const api = apiEndpointRefusal(segment);
+			if (api) return api;
+		}
+	}
 	if (depth < MAX_SCAN_DEPTH) {
 		for (const span of substitutionSpans(segment)) {
 			const refusal = segmentRefusal(span, depth + 1);
 			if (refusal) return refusal;
 		}
 	}
-	const main = starts[0];
+	const main = resolution.starts[0];
 	if (main === undefined || words[main] !== "gh") {
 		return apiRefusal(segment);
 	}
@@ -538,9 +683,14 @@ export function inspectCommand(
 		const words = tokens(segment);
 		const refusal = segmentRefusal(segment, 0);
 		if (refusal) return refusal;
-		if (pushIndex(words) !== -1) {
-			const push = pushRefusal(words, head ?? null);
-			if (push) return push;
+		const push = pushIndex(words);
+		if (push.index !== -1) {
+			const refused = pushRefusal(words, head ?? null, push.index);
+			if (refused) return refused;
+		}
+		if (push.ambiguous) {
+			const fallback = ambiguousPushRefusal(words, head ?? null);
+			if (fallback) return fallback;
 		}
 	}
 	return null;
