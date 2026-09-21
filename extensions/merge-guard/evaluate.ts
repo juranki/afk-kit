@@ -3,15 +3,19 @@
  * the one thing strings cannot answer — the current branch, resolved with
  * real git only when a push's verdict depends on it. Since #38, that one
  * resolution runs in the command's own directory: leading `cd <dir>`
- * segments move it off the session cwd — the first whatever operator joins
- * it to the rest (`;` and a newline preserve the change just like `&&`),
- * the rest while `&&`-joined — so a worktree push led by `cd` is judged by
- * the worktree's branch, not the session checkout's. Two stops keep the
- * undecided stance, refuse-only-what-you-can-name: a leading `cd` the walk
- * cannot read (a variable target — the push does not run where the walk
- * ended) and a resolution that fails. A `cd` after a real command is not
- * part of the walk: the session directory decides, a residue documented in
- * README.md. L2 covers it against a fixture clone.
+ * segments move it off the session cwd while the operator joining each
+ * onward carries the change in the shell (`&&`, `;`, or a newline), so a
+ * worktree push led by `cd` is judged by the worktree's branch, not the
+ * session checkout's. A `|` or `||` join stops the walk, and the directory
+ * accumulated to that point decides: under `|` that is the shell's own
+ * truth — each pipeline element runs in a subshell the `cd` never touches
+ * — while under `||` the push leg may not run at all, the over-refusal
+ * residue documented in README.md. Two stops keep the undecided stance,
+ * refuse-only-what-you-can-name: a leading `cd` the walk cannot read while
+ * it is still consuming (a variable target — the push does not run where
+ * the walk ended) and a resolution that fails. A `cd` after a real command
+ * is not part of the walk: a residue documented in README.md. L2 covers it
+ * against a fixture clone.
  */
 
 import * as path from "node:path";
@@ -56,17 +60,33 @@ function readCd(segment: string): CdRead {
 }
 
 /**
+ * The operators across which a `cd`'s directory change carries in the
+ * shell, so the walk may consume a simple `cd` joined onward by one: `&&`
+ * and `;` run what follows in the same shell, and a newline is `;`. `|` and
+ * `||` do not carry — a pipeline element is a subshell, and an `||` leg
+ * runs only after the `cd` failed — so they stop the walk.
+ */
+const CD_CARRIES = new Set(["&&", ";", "\n"]);
+
+/**
  * The directory a head-dependent push runs in, per the conservative walk:
- * consume leading simple `cd` segments, resolving relative targets against
- * the walk's progress. The first segment is consumed whatever operator
- * joins it to the rest of the command (`;` preserves the change like `&&`);
- * the run continues through further simple `cd`s while `&&`-joined and
- * stops before the first segment that is not one. The stop kind decides
- * how the result may be used: stopping at a `cd` the walk cannot read means
- * the push certainly does not run where the walk ended (`cd $WT && git
- * push` runs wherever `$WT` points), so the caller must not decide there;
- * stopping at a real command means the command never had a cd-led prefix
- * and the session directory stands.
+ * consume leading simple `cd` segments — each only while the operator
+ * joining it onward carries the change in the shell (`&&`, `;`, or a
+ * newline) — resolving relative targets against the walk's progress. A `|`
+ * or `||` join stops the walk before the segment it joins, and the
+ * directory accumulated to that point decides: under `|` that is exactly
+ * the shell's truth, because each pipeline element runs in a subshell, so
+ * the push leg runs where the walk stands and its own element's `cd` never
+ * touches it (`|` binds tighter than `&&`, so `cd /a && cd /b | git push`
+ * pushes from `/a`); under `||` the push leg may not run at all after a
+ * successful `cd` — the documented over-refusal residue. Because the stop
+ * happens before the segment is read, even a `cd` the walk cannot read at
+ * a `|`/`||` join leaves the accumulated directory standing. Within the
+ * consuming run the stop kind decides how the result may be used: a `cd`
+ * the walk cannot read means the push certainly does not run where the
+ * walk ended (`cd $WT && git push` runs wherever `$WT` points), so the
+ * caller must not decide there; a real command means the command never had
+ * a cd-led prefix and the session directory stands.
  */
 function effectiveDirectory(
 	command: string,
@@ -75,7 +95,8 @@ function effectiveDirectory(
 	const parts = command.split(new RegExp(`(${SEGMENT_SPLIT.source})`));
 	let dir = sessionCwd;
 	for (let i = 0; i < parts.length; i += 2) {
-		if (i > 0 && parts[i - 1] !== "&&") break;
+		const join = parts[i + 1];
+		if (join !== undefined && !CD_CARRIES.has(join)) break;
 		const read = readCd(parts[i]);
 		if (read.kind === "simple") {
 			dir = path.resolve(dir, read.target);

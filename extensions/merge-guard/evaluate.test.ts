@@ -135,6 +135,47 @@ describe("evaluate — the command's own directory (#38)", () => {
 		expect(refusal?.kind).toBe("push-to-main");
 	});
 
+	test("a leading cd joined by | is not consumed: the pipeline's push leg runs in the session directory", async () => {
+		// Each pipeline element runs in a subshell, so the cd never leaves its
+		// own element: the push leg really runs in the session checkout.
+		const work = clone("issue-1-x");
+		const session = clone("main");
+		const refusal = await evaluate(`cd ${work} | git push 2>&1`, session);
+		expect(refusal?.kind).toBe("push-to-main");
+	});
+
+	test("a leading cd joined by || is not consumed: the session directory decides", async () => {
+		// The push leg runs only when the cd failed — and then in the
+		// directory the walk stands in. When the cd succeeds the push never
+		// runs, so this refusal from a main checkout is the documented
+		// over-refusal residue.
+		const work = clone("issue-1-x");
+		const session = clone("main");
+		const refusal = await evaluate(`cd ${work} || git push`, session);
+		expect(refusal?.kind).toBe("push-to-main");
+	});
+
+	test("a cd whose target is a variable at an || join stays a pass from a non-repo cwd", async () => {
+		// The walk stopped at the || before reading the cd; the session
+		// directory decides, and from a non-main session the verdict passes.
+		expect(await evaluate("cd $NOPE || git push", root)).toBeNull();
+	});
+
+	test("cd-led pushes joined by ; and && still carry the walk: pass from a main-checkout session into a worktree", async () => {
+		const work = clone("issue-1-x");
+		const session = clone("main");
+		expect(await evaluate(`cd ${work} ; git push`, session)).toBeNull();
+		expect(await evaluate(`cd ${work} && git push`, session)).toBeNull();
+	});
+
+	test("a cd-led push into a main checkout joined by ; refuses from a ticket-branch session cwd", async () => {
+		const mainCheckout = clone("main");
+		const session = clone("issue-1-x");
+		const refusal = await evaluate(`cd ${mainCheckout} ; git push`, session);
+		expect(refusal?.kind).toBe("push-to-main");
+		expect(refusal?.matched).toContain("(current branch main)");
+	});
+
 	test("a cd whose target is a variable keeps the undecided stance from a main checkout", async () => {
 		// The shell would run the push wherever $WT points — never the
 		// session checkout — so the head must not be resolved from it.
