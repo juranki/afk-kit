@@ -26,9 +26,35 @@ instructs stop-and-report per the escalation convention:
   explicit `main`/`refs/heads/main` refspecs in any spelling (including
   deletes, forces, and `HEAD:main`), `--all` and `--mirror` (which carry
   `main`), and, resolved with one real `git rev-parse`, a bare `git push`,
-  a repository-only push, or a bare `HEAD` refspec from a checkout whose
-  current branch is `main`. A failed resolution stays undecided: the guard
-  refuses only what it can name.
+  a repository-only push, or a bare `HEAD` refspec from the command's own
+  directory when its current branch is `main`. A failed resolution stays
+  undecided: the guard refuses only what it can name.
+
+### The command's own directory (#38)
+
+A head-dependent push is judged in the directory the command itself runs
+in, not the session's working directory. Leading `cd <dir>` segments joined
+by `&&` — one plain directory each, optionally `-L`/`-P` — move the
+directory the one branch resolution runs in, so `cd <worktree> && git
+push` from a main-checkout session is judged by the worktree's branch and
+passes, while the same push from a checkout on `main` refuses naming the
+branch actually resolved there.
+
+Anything else keeps the undecided stance, refuse-only-what-you-can-name:
+a `cd` joined by `;`, `|`, or a newline (the shell may not have survived
+it); a `cd` whose target cannot be confidently read (a variable, a
+subshell, quoting the string-level guard sees through only partially);
+any chain that stops before the push; a resolution that fails. Undecided
+means the head-dependent verdict passes — the guard never guesses a
+branch to refuse.
+
+Redirection tokens (`2>&1`, `>build.log`, `>>file`, `2>file`, `<file`,
+`&>file`, and bare `>`/`>>`/`<`/`2>`/`&>` plus their target) are stripped
+before push parsing — parse hygiene, so a redirect can neither disguise a
+bare push (the fail-open hole this closes) nor be mistaken for a refspec.
+The strip is string-level and shares the documented over-matching residue
+below: an operator-shaped token inside a quoted argument (a bare `>` in a
+jq filter) strips too, and that changes no verdict.
 
 ## What passes through
 

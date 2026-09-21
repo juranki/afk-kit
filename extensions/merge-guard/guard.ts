@@ -5,7 +5,10 @@
  * `git push` targeting `main` — and which pattern fired; it never spawns
  * anything, so the whole matrix is L1-provable offline. Branch-dependent
  * pushes (a bare `git push`, a bare `HEAD` refspec) are flagged by
- * `needsHead` and resolved by the caller (evaluate.ts) with real git.
+ * `needsHead` and resolved by the caller (evaluate.ts) with real git in
+ * the command's own directory (#38). Redirection tokens are stripped in
+ * the tokenizer (#38) so no verdict consumer ever mistakes one for a
+ * refspec or repository positional.
  *
  * The strength bar is ADR 0011's, stated honestly: airtight within a loaded
  * session at accident level, not adversarially — the documented bypass is
@@ -67,18 +70,58 @@ const PUSH_VALUE_FLAGS = new Set([
 	"-o",
 ]);
 
-const SEGMENT_SPLIT = /&&|\|\||;|\||\n/;
+/** One command segment: `&&`, `||`, `;`, `|`, or a newline separates them. */
+export const SEGMENT_SPLIT = /&&|\|\||;|\||\n/;
 
 /** Strip quoting and subshell punctuation from one whitespace token. */
 function cleanToken(token: string): string {
 	return token.replace(/^[({[$'"`]+/, "").replace(/[)}\]'"`;,.]+$/, "");
 }
 
+/**
+ * Redirection with the target embedded in the same token — an optional fd
+ * prefix, the operator, a non-empty target: `2>&1`, `>file`, `>>file`,
+ * `2>file`, `<file`, `&>file`.
+ */
+const REDIRECT_EMBEDDED = /^(?:\d+|&)?(?:>>|>&|>|<)\S+$/;
+
+/** A redirection operator alone — `>`, `>>`, `<`, `2>`, `&>` — whose target
+ * is the next token (or a dup spec like `&1`). */
+const REDIRECT_BARE = /^(?:\d+|&)?(?:>>|>&|>|<)$/;
+
+/**
+ * Drop redirection syntax so no consumer (pushIndex, parsePush, refspec
+ * checks) ever sees it: an embedded `2>&1`-form token drops whole, a bare
+ * operator drops together with the next token — the target, or an
+ * operator-shaped dup spec like `&1`, which is redirection syntax either
+ * way. This is string-level parse hygiene, so it shares the documented
+ * over-matching residue (README): cleanToken has already stripped quoting,
+ * meaning an operator-shaped token inside a quoted argument (a bare `>` in
+ * a jq filter) is indistinguishable from redirection here and strips too.
+ * That residue touches no verdict: verdicts judge only `git push` segments
+ * and their refspecs, and removing redirection tokens never names a
+ * refspec that was not already in the command.
+ */
+function stripRedirects(words: string[]): string[] {
+	const kept: string[] = [];
+	for (let i = 0; i < words.length; i++) {
+		if (REDIRECT_EMBEDDED.test(words[i])) continue;
+		if (REDIRECT_BARE.test(words[i])) {
+			i += 1;
+			continue;
+		}
+		kept.push(words[i]);
+	}
+	return kept;
+}
+
 function tokens(segment: string): string[] {
-	return segment
-		.split(/\s+/)
-		.map(cleanToken)
-		.filter((word) => word.length > 0);
+	return stripRedirects(
+		segment
+			.split(/\s+/)
+			.map(cleanToken)
+			.filter((word) => word.length > 0),
+	);
 }
 
 /**
