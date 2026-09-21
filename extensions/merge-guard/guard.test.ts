@@ -231,6 +231,28 @@ describe("inspectCommand — redirection stripping (#38)", () => {
 		expect(inspectCommand("jq 'select(.size > 1)' out.json")).toBeNull();
 	});
 
+	test("append and fd-prefixed append forms judge exactly as a bare push (#38 review)", () => {
+		for (const cmd of [
+			"git push >>log 2>&1",
+			"git push 2>>log",
+			"git push >> log 2>&1",
+			"git push > log 2>&1",
+		]) {
+			const refusal = inspectCommand(cmd, "main");
+			expect(refusal?.kind).toBe("push-to-main");
+			expect(refusal?.matched).toBe("git push (current branch main)");
+			expect(inspectCommand(cmd, "issue-1-x")).toBeNull();
+			expect(needsHead(cmd)).toBe(true);
+		}
+	});
+
+	test("a bare append operator drops its target instead of naming it a positional (#38 review)", () => {
+		expect(inspectCommand("git push origin >> main", "issue-1-x")).toBeNull();
+		expect(inspectCommand("git push origin >> main", "main")?.matched).toBe(
+			"git push origin (current branch main)",
+		);
+	});
+
 	test("redirection-disguised bare pushes still need a head", () => {
 		expect(needsHead("git push 2>&1")).toBe(true);
 		expect(needsHead("git push --quiet >build.log 2>&1")).toBe(true);

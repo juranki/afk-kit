@@ -81,9 +81,12 @@ function cleanToken(token: string): string {
 /**
  * Redirection with the target embedded in the same token — an optional fd
  * prefix, the operator, a non-empty target: `2>&1`, `>file`, `>>file`,
- * `2>file`, `<file`, `&>file`.
+ * `2>file`, `<file`, `&>file`. The `(?![<>&])` keeps the operator maximal:
+ * without it a bare `>>`/`2>>` (target in the next token) backtracks into
+ * operator `>` plus a bogus `>` target, drops alone, and its real target
+ * leaks through stripRedirects as a positional (#38 review).
  */
-const REDIRECT_EMBEDDED = /^(?:\d+|&)?(?:>>|>&|>|<)\S+$/;
+const REDIRECT_EMBEDDED = /^(?:\d+|&)?(?:>>|>&|>|<)(?![<>&])\S+$/;
 
 /** A redirection operator alone — `>`, `>>`, `<`, `2>`, `&>` — whose target
  * is the next token (or a dup spec like `&1`). */
