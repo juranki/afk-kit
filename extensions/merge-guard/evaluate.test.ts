@@ -81,6 +81,18 @@ describe("evaluate — real git resolution", () => {
 		expect(await evaluate("git push -u origin issue-1-x", work)).toBeNull();
 	});
 
+	test("an ambiguous bare push defers to the real branch", async () => {
+		const work = clone("issue-1-x");
+		const git = (args: string[]) =>
+			spawnSync("git", args, { cwd: work, stdio: "ignore" });
+		git(["checkout", "main"]);
+		expect((await evaluate("git --unknown x push", work))?.matched).toBe(
+			"git push behind unrecognized flags",
+		);
+		git(["checkout", "issue-1-x"]);
+		expect(await evaluate("git --unknown x push", work)).toBeNull();
+	});
+
 	test("a broken cwd resolves no head and stays undecided", async () => {
 		expect(
 			await evaluate("git push", path.join(clone("main"), "nope")),
