@@ -35,9 +35,67 @@ instructs stop-and-report per the escalation convention:
   explicit `main`/`refs/heads/main` refspecs in any spelling (including
   deletes, forces, and `HEAD:main`), `--all` and `--mirror` (which carry
   `main`), and, resolved with one real `git rev-parse`, a bare `git push`,
-  a repository-only push, or a bare `HEAD` refspec from a checkout whose
-  current branch is `main`. A failed resolution stays undecided: the guard
-  refuses only what it can name.
+  a repository-only push, or a bare `HEAD` refspec from the command's own
+  directory when its current branch is `main`. A failed resolution stays
+  undecided: the guard refuses only what it can name.
+
+### The command's own directory (#38)
+
+A head-dependent push is judged in the directory the command itself runs
+in, not the session's working directory. The walk that finds that directory
+follows the shell's own joining semantics, and this is its whole contract:
+
+- **A leading run of simple `cd [-L|-P] <plain-dir>` segments moves the
+  directory** the one branch resolution runs in. A segment is consumed only
+  while the operator joining it onward carries the directory change in the
+  shell — `&&`, `;`, or a newline (`;` and a newline preserve the change
+  just like `&&`, so `cd <worktree>; git push` decides in the worktree);
+  relative targets resolve against the walk's progress. So `cd <worktree> &&
+  git push` from a main-checkout session is judged by the worktree's branch
+  and passes, while the same push from a checkout on `main` refuses naming
+  the branch actually resolved there.
+- **A `|` or `||` join stops the walk, and the directory accumulated to
+  that point decides.** Under `|` the verdict is exact, not conservative:
+  each pipeline element runs in a subshell, so the `cd` never leaves its own
+  element and the push leg really runs where the walk stands — `cd
+  <worktree> | git push 2>&1` from a main-checkout session refuses,
+  correctly, because the pipeline's push leg runs in that main checkout.
+  Under `||` the push leg runs only when the `cd` failed — and then in the
+  directory the walk stands in — but after a successful `cd` it may not run
+  at all, so `cd <dir> || git push` from a checkout on `main` can refuse a
+  push that never runs: the documented over-refusal class, accepted like the
+  untracked-`cd` residue below.
+- **The directory persists across interior commands** — it never resets:
+  `cd <worktree> && git status && git push` still decides in the worktree.
+- **A `cd` that appears after a real command is not tracked** — the
+  session directory decides, even though the shell will have changed
+  directory by push time. This residue fails in both directions, and both
+  are accepted costs, not hidden holes: a session sitting in a main
+  checkout false-refuses a worktree push led by the untracked `cd`
+  (`git status && cd <worktree> && git push`); a session on a ticket
+  branch false-passes a push that will really run in a main checkout
+  (`git status && cd <main-checkout> && git push`).
+
+Anything else keeps the undecided stance, refuse-only-what-you-can-name:
+a leading `cd` whose target cannot be confidently read — a variable, a
+subshell, quoting the string-level guard sees through only partially, no
+target at all — while the walk is still consuming, i.e. joined onward by
+`&&`, `;`, or a newline; at a `|`/`||` stop the segment is never read, so
+even `cd $WT | git push` decides in the directory accumulated to the stop.
+`cd $WT && git push` passes undecided from any session,
+including a checkout on `main`: the push does not run where the walk
+ended, so the head is never resolved from a directory the command may not
+run in. A resolution that fails (a broken directory, a `~` target) stays
+undecided too. Undecided means the head-dependent verdict passes — the
+guard never guesses a branch to refuse.
+
+Redirection tokens (`2>&1`, `>build.log`, `>>file`, `2>file`, `<file`,
+`&>file`, and bare `>`/`>>`/`<`/`2>`/`&>` plus their target) are stripped
+before push parsing — parse hygiene, so a redirect can neither disguise a
+bare push (the fail-open hole this closes) nor be mistaken for a refspec.
+The strip is string-level and shares the documented over-matching residue
+below: an operator-shaped token inside a quoted argument (a bare `>` in a
+jq filter) strips too, and that changes no verdict.
 
 ## What passes through
 

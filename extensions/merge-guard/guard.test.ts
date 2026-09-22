@@ -421,6 +421,76 @@ describe("inspectCommand — head-dependent pushes", () => {
 	});
 });
 
+describe("inspectCommand — redirection stripping (#38)", () => {
+	test("a bare push disguised by redirections refuses as a bare push on main", () => {
+		const refusal = inspectCommand("git push --quiet >build.log 2>&1", "main");
+		expect(refusal?.kind).toBe("push-to-main");
+		expect(refusal?.matched).toBe("git push (current branch main)");
+	});
+
+	test("redirections around a bare push keep the head split clean", () => {
+		const refused = inspectCommand("git push >out.log 2>&1", "main");
+		expect(refused?.kind).toBe("push-to-main");
+		expect(refused?.matched).toBe("git push (current branch main)");
+		expect(inspectCommand("git push >out.log 2>&1", "issue-1-x")).toBeNull();
+		expect(inspectCommand("git push 2>&1", "main")?.kind).toBe("push-to-main");
+		expect(inspectCommand("git push 2>&1", "issue-1-x")).toBeNull();
+	});
+
+	test("a redirection does not launder an explicit main refspec", () => {
+		const refusal = inspectCommand("git push origin main >log", "main");
+		expect(refusal?.kind).toBe("push-to-main");
+		expect(refusal?.matched).toBe("main");
+	});
+
+	test("strip then judge: a read-shaped bare push still follows bare-push semantics", () => {
+		const refusal = inspectCommand(
+			"git push --porcelain >result.txt 2>&1",
+			"main",
+		);
+		expect(refusal?.kind).toBe("push-to-main");
+		expect(refusal?.matched).toBe("git push (current branch main)");
+	});
+
+	test("an operator-shaped token inside a quoted argument is stripped (documented residue) without changing the push verdict", () => {
+		const withFilter =
+			"jq 'select(.size > 1)' out.json && git push origin main";
+		const refusal = inspectCommand(withFilter, "main");
+		expect(refusal?.kind).toBe("push-to-main");
+		expect(refusal?.matched).toBe(
+			inspectCommand("git push origin main", "main")?.matched,
+		);
+		expect(inspectCommand("jq 'select(.size > 1)' out.json")).toBeNull();
+	});
+
+	test("append and fd-prefixed append forms judge exactly as a bare push (#38 review)", () => {
+		for (const cmd of [
+			"git push >>log 2>&1",
+			"git push 2>>log",
+			"git push >> log 2>&1",
+			"git push > log 2>&1",
+		]) {
+			const refusal = inspectCommand(cmd, "main");
+			expect(refusal?.kind).toBe("push-to-main");
+			expect(refusal?.matched).toBe("git push (current branch main)");
+			expect(inspectCommand(cmd, "issue-1-x")).toBeNull();
+			expect(needsHead(cmd)).toBe(true);
+		}
+	});
+
+	test("a bare append operator drops its target instead of naming it a positional (#38 review)", () => {
+		expect(inspectCommand("git push origin >> main", "issue-1-x")).toBeNull();
+		expect(inspectCommand("git push origin >> main", "main")?.matched).toBe(
+			"git push origin (current branch main)",
+		);
+	});
+
+	test("redirection-disguised bare pushes still need a head", () => {
+		expect(needsHead("git push 2>&1")).toBe(true);
+		expect(needsHead("git push --quiet >build.log 2>&1")).toBe(true);
+	});
+});
+
 describe("needsHead", () => {
 	test("flags bare, repository-only, and bare-HEAD pushes", () => {
 		expect(needsHead("git push")).toBe(true);
