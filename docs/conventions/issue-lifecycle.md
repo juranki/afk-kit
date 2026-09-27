@@ -58,6 +58,13 @@ marker vocabulary:
 - `PUBLISH_REFUSAL` — the branch already has an open PR (named), a verify command
   failed in the worktree (named, nothing pushed), a step failed, or compensation
   itself failed.
+- `HANDOFF_REFUSAL` — a step of the handoff operation failed. Nothing is undone:
+  the PR stays open, the pushed branch stays put, and the refusal names what
+  completed and what stands. The Run escalates; the Escalation preserves the PR,
+  branch, and worktree.
+- `ESCALATION_FAILURE` — the escalation itself could not complete a step (the
+  CLI's internal-failure exit). Every step is still attempted; the failure names
+  what completed and what stuck. The preserved artifacts are untouched.
 
 Discipline, identical for both ops:
 
@@ -70,6 +77,26 @@ Discipline, identical for both ops:
 - The publish order is: verify commands → push → open the PR (review requested from
   the maintainer) → apply `in-review` → remove `in-progress` (applied first, removed
   second, so the issue is never momentarily unlabeled while a PR is open).
+
+## Engine operation refusals
+
+The Engine's narrow operations (`engine/`, ticket #58) enforce the same semantics as
+the claim and publish ops, with two refinements:
+
+- `bootstrapDraftPr` and `pushCandidate` refuse with `PUBLISH_REFUSAL` — they are the
+  publish mechanics reshaped. `bootstrapDraftPr` accepts an existing open **draft** PR
+  for the branch (deterministic identity: one PR per branch) and refuses a ready one;
+  it never touches the ticket's labels. `pushCandidate` pushes additively only — a
+  non-fast-forward remote refuses naturally, nothing is ever forced.
+- `handOffPr` — record the final evidence in the PR body, mark the draft ready, apply
+  `in-review`, remove `in-progress` (same applied-first/removed-second order), and
+  never request a review from the PR author. A failed handoff compensates nothing
+  destructively (`HANDOFF_REFUSAL`); the Run escalates and the Escalation preserves
+  the artifacts ([review and escalation](review-and-escalation.md)).
+- `escalateRun` posts the status comment, applies `needs-info`, and removes only the
+  workflow labels the ticket actually carries. The assignee, PR, branch, worktree,
+  and run evidence are never touched. An incomplete escalation is an
+  `ESCALATION_FAILURE`.
 
 ## Who may move what
 
