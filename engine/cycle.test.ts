@@ -286,9 +286,10 @@ async function runDrivenWorld(
 				hang: options.hangSession === true,
 				finalReport: options.report,
 			}),
-			...(options.confinementRuntime === undefined
-				? {}
-				: { confinementRuntime: options.confinementRuntime }),
+			// The fake srt port always backs the cycle: real sandbox-runtime
+			// initialization is a host capability (the confinement smoke's
+			// job), not something an L2 test may depend on.
+			confinementRuntime: options.confinementRuntime ?? fakeRuntime().port,
 			...(options.implementerCapMs === undefined
 				? {}
 				: { implementerCapMs: options.implementerCapMs }),
