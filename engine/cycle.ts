@@ -1,12 +1,11 @@
 /**
- * The real Implement–Review Cycle port (ticket afk-kit #62, durable spec
+ * The real Implement–Verify Cycle port (ticket afk-kit #62, durable spec
  * #46): one fresh confined Implementer session from the cumulative
- * worktree, the observed-fact done checks, deterministic Verify
- * execution, and the cycle's complete evidence under the Run's artifacts.
- * The Implementer's prose and structured result are claims; this port
- * judges done from Git facts and verify exit codes, and only a verified
- * cycle reaches the machine's candidate push. Reviews are later tickets:
- * an approved cycle carries no approvals yet.
+ * worktree, the observed-fact done checks, and deterministic Verify
+ * execution. The Implementer's prose and structured result are claims;
+ * this port judges done from Git facts and verify exit codes. A verified
+ * cycle is pushed by the machine and then faces the parallel Reviews
+ * (ticket #63) — a verified cycle carries no approvals yet.
  *
  * A judged failure returns `failed` with bounded feedback for the next
  * fresh Implementer; infrastructure uncertainty (confinement, Git, the
@@ -21,7 +20,7 @@ import { parseBrief } from "../extensions/readiness/brief.ts";
 import { verifyCommandList } from "../extensions/readiness/check.ts";
 import {
 	createImplementerSessionFactory,
-	runImplementerSession,
+	runAgentSession,
 	type SessionFactory,
 } from "./agent-runner.ts";
 import { createTaskConfinement } from "./confinement.ts";
@@ -87,27 +86,32 @@ function verifyCommandsOf(brief: string): string[] {
 }
 
 /**
- * Prior failed cycles' bounded feedback, from the cycle results the
- * driving loop persists; the next fresh Implementer inherits them all.
+ * Prior failed cycles' bounded feedback, from the results the driving
+ * loop persists; the next fresh Implementer inherits them all — both the
+ * Implement–Verify failures and the Review gate's requested changes.
  */
 function priorFeedback(handle: RunHandle, cycle: number): string | undefined {
 	const parts: string[] = [];
 	for (let prior = 1; prior < cycle; prior += 1) {
-		try {
-			const file = path.join(
-				handle.artifactsDir,
-				`cycle-${String(prior)}`,
-				"result.json",
-			);
-			const outcome = JSON.parse(fs.readFileSync(file, "utf8")) as {
-				status?: string;
-				reason?: string;
-			};
-			if (outcome.status === "failed" && outcome.reason) {
-				parts.push(outcome.reason);
+		const dir = path.join(handle.artifactsDir, `cycle-${String(prior)}`);
+		for (const file of ["result.json", "review-result.json"]) {
+			try {
+				const outcome = JSON.parse(
+					fs.readFileSync(path.join(dir, file), "utf8"),
+				) as {
+					status?: string;
+					reason?: string;
+				};
+				if (
+					(outcome.status === "failed" ||
+						outcome.status === "changes-requested") &&
+					outcome.reason
+				) {
+					parts.push(outcome.reason);
+				}
+			} catch {
+				// A missing prior result is not feedback; the cycle proceeds.
 			}
-		} catch {
-			// A missing prior result is not feedback; the cycle proceeds.
 		}
 	}
 	return parts.length === 0 ? undefined : parts.join("\n\n");
@@ -182,7 +186,7 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 					modelRuntime: ports.modelRuntime,
 				});
 			const startedMs = Date.now();
-			const spawn = await runImplementerSession(
+			const spawn = await runAgentSession(
 				{
 					worktree,
 					prompt: buildImplementerPrompt({
@@ -250,10 +254,9 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 				};
 			}
 			return {
-				status: "approved",
+				status: "verified",
 				cycle,
 				verifyResults: verify.results.map(toVerifyResult),
-				approvals: [],
 			};
 		} finally {
 			await confinement.dispose();

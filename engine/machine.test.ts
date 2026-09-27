@@ -14,7 +14,7 @@ import {
 	startState,
 	transition,
 } from "./machine.ts";
-import type { CycleOutcome } from "./ports.ts";
+import type { CycleOutcome, ReviewOutcome } from "./ports.ts";
 import type { CandidatePushOutcome, HandOffOutcome } from "./pr-ops.ts";
 
 const CLAIMED: ClaimTicketOutcome = {
@@ -71,20 +71,21 @@ function cycling(cycle = 1): MachineState {
 	return state;
 }
 
-const APPROVED: CycleOutcome = {
-	status: "approved",
+/**
+ * A verified candidate: the Implementer's facts agreed and Verify passed.
+ * The cycle carries no approvals — approval belongs to the Review gate.
+ */
+const VERIFIED: CycleOutcome = {
+	status: "verified",
 	cycle: 1,
 	verifyResults: [{ command: "bun test", ok: true }],
-	approvals: [
-		{ review: "standards", verdict: { verdict: "approve" } },
-		{ review: "spec", verdict: { verdict: "approve" } },
-	],
 };
 
-function publishing(outcome: CycleOutcome = APPROVED): MachineState {
-	const { state } = transition(cycling(), cycleEvent(outcome));
-	if (state.name !== "publish") {
-		throw new Error(`fixture: expected publish, got ${state.name}`);
+function publishing(cycle = 1): MachineState {
+	const outcome: CycleOutcome = { ...VERIFIED, cycle };
+	const { state } = transition(cycling(cycle), cycleEvent(outcome));
+	if (state.name !== "publish" || state.cycle !== cycle) {
+		throw new Error(`fixture: expected publish ${cycle}, got ${state.name}`);
 	}
 	return state;
 }
@@ -93,22 +94,42 @@ function candidatePushEvent(outcome: CandidatePushOutcome): MachineEvent {
 	return { type: "candidate-push", outcome };
 }
 
+const PUSHED: CandidatePushOutcome = {
+	status: "pushed",
+	issue: 61,
+	branch: CLAIMED.branch,
+	commits: 2,
+	head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	text: "Pushed 2 candidate commits.",
+};
+
+const DUAL_APPROVAL: ReviewOutcome = {
+	status: "approved",
+	cycle: 1,
+	approvals: [
+		{ review: "standards", verdict: { verdict: "approve" } },
+		{ review: "spec", verdict: { verdict: "approve" } },
+	],
+};
+
+function reviewEvent(outcome: ReviewOutcome): MachineEvent {
+	return { type: "review", outcome };
+}
+
+function reviewing(cycle = 1): MachineState {
+	const { state } = transition(publishing(cycle), candidatePushEvent(PUSHED));
+	if (state.name !== "review" || state.cycle !== cycle) {
+		throw new Error(`fixture: expected review ${cycle}, got ${state.name}`);
+	}
+	return state;
+}
+
 function handoffEvent(outcome: HandOffOutcome): MachineEvent {
 	return { type: "handoff", outcome };
 }
 
 function handingOff(): MachineState {
-	const { state } = transition(
-		publishing(),
-		candidatePushEvent({
-			status: "pushed",
-			issue: 61,
-			branch: CLAIMED.branch,
-			commits: 2,
-			head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-			text: "Pushed 2 candidate commits.",
-		}),
-	);
+	const { state } = transition(reviewing(), reviewEvent(DUAL_APPROVAL));
 	if (state.name !== "handoff") {
 		throw new Error(`fixture: expected handoff, got ${state.name}`);
 	}
@@ -231,13 +252,12 @@ describe("Engine state machine: draft-PR bootstrap", () => {
 });
 
 describe("Engine state machine: Implement–Review Cycles", () => {
-	test("an approved cycle publishes the candidate commits", () => {
-		const { state, effect } = transition(cycling(), cycleEvent(APPROVED));
+	test("a verified cycle publishes the candidate commits", () => {
+		const { state, effect } = transition(cycling(), cycleEvent(VERIFIED));
 
 		expect(state.name).toBe("publish");
 		if (state.name === "publish") {
-			expect(state.approved.verifyResults).toEqual(APPROVED.verifyResults);
-			expect(state.approved.approvals).toEqual(APPROVED.approvals);
+			expect(state.verified.verifyResults).toEqual(VERIFIED.verifyResults);
 		}
 		expect(effect).toEqual({
 			type: "candidate-push",
@@ -293,33 +313,29 @@ describe("Engine state machine: Implement–Review Cycles", () => {
 	});
 });
 
-describe("Engine state machine: publish and handoff", () => {
-	test("a pushed candidate hands the PR to the Maintainer", () => {
+describe("Engine state machine: publish and the Review gate", () => {
+	test("a pushed candidate faces the parallel Reviews", () => {
 		const { state, effect } = transition(
 			publishing(),
-			candidatePushEvent({
-				status: "pushed",
-				issue: 61,
-				branch: CLAIMED.branch,
-				commits: 2,
-				head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-				text: "Pushed.",
-			}),
+			candidatePushEvent(PUSHED),
 		);
 
-		expect(state.name).toBe("handoff");
-		expect(effect?.type).toBe("handoff");
-		if (effect?.type === "handoff") {
-			expect(effect.input).toEqual({
+		expect(state).toEqual({
+			name: "review",
+			claim: {
 				issue: 61,
 				branch: CLAIMED.branch,
+				base: CLAIMED.base,
 				worktree: CLAIMED.worktree,
-				verifyResults: APPROVED.verifyResults,
-			});
-		}
+			},
+			pr: PR,
+			cycle: 1,
+			verified: { cycle: 1, verifyResults: VERIFIED.verifyResults },
+		});
+		expect(effect).toEqual({ type: "review", cycle: 1 });
 	});
 
-	test("an already-pushed candidate is the expected state — handoff proceeds", () => {
+	test("an already-pushed candidate is the expected state — the Reviews still run", () => {
 		const { state, effect } = transition(
 			publishing(),
 			candidatePushEvent({
@@ -331,8 +347,8 @@ describe("Engine state machine: publish and handoff", () => {
 			}),
 		);
 
-		expect(state.name).toBe("handoff");
-		expect(effect?.type).toBe("handoff");
+		expect(state.name).toBe("review");
+		expect(effect?.type).toBe("review");
 	});
 
 	test("a refused candidate push escalates — side-effect uncertainty", () => {
@@ -355,20 +371,37 @@ describe("Engine state machine: publish and handoff", () => {
 		expect(effect).toEqual({ type: "escalate" });
 	});
 
-	test("review notes ride along to the handoff", () => {
-		const approvedWithNotes: CycleOutcome = {
-			...APPROVED,
-			reviewNotes: "Both Reviews left guidance for the Maintainer.",
-		};
-		const { effect } = transition(
-			publishing(approvedWithNotes),
-			candidatePushEvent({
-				status: "pushed",
+	test("dual approval is the only road to the handoff", () => {
+		const { state, effect } = transition(
+			reviewing(),
+			reviewEvent(DUAL_APPROVAL),
+		);
+
+		expect(state.name).toBe("handoff");
+		if (state.name === "handoff") {
+			expect(state.approved).toEqual({
+				cycle: 1,
+				verifyResults: VERIFIED.verifyResults,
+				approvals: DUAL_APPROVAL.approvals,
+			});
+		}
+		if (effect?.type === "handoff") {
+			expect(effect.input).toEqual({
 				issue: 61,
 				branch: CLAIMED.branch,
-				commits: 1,
-				head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-				text: "Pushed.",
+				worktree: CLAIMED.worktree,
+				verifyResults: VERIFIED.verifyResults,
+			});
+		}
+		expect(effect?.type).toBe("handoff");
+	});
+
+	test("review notes ride along to the handoff", () => {
+		const { effect } = transition(
+			reviewing(),
+			reviewEvent({
+				...DUAL_APPROVAL,
+				reviewNotes: "Both Reviews left guidance for the Maintainer.",
 			}),
 		);
 
@@ -378,6 +411,61 @@ describe("Engine state machine: publish and handoff", () => {
 			);
 		}
 		expect(effect?.type).toBe("handoff");
+	});
+
+	test("one requesting review fails the cycle while cycles remain", () => {
+		const { state, effect } = transition(
+			reviewing(1),
+			reviewEvent({
+				status: "changes-requested",
+				cycle: 1,
+				reason: "standards review requests changes: no tests",
+			}),
+		);
+
+		expect(state.name).toBe("cycle");
+		if (state.name === "cycle") expect(state.cycle).toBe(2);
+		expect(effect).toEqual({ type: "cycle", cycle: 2 });
+	});
+
+	test("a Cycle 3 review requesting changes escalates — no Cycle 4 exists", () => {
+		const { state, effect } = transition(
+			reviewing(MAX_CYCLES),
+			reviewEvent({
+				status: "changes-requested",
+				cycle: MAX_CYCLES,
+				reason: "spec review requests changes: criterion unmet",
+			}),
+		);
+
+		expect(state).toEqual({
+			name: "escalated",
+			reason: "spec review requests changes: criterion unmet",
+			stage: "review",
+			cycle: MAX_CYCLES,
+			facts: { branch: CLAIMED.branch, worktree: CLAIMED.worktree, pr: PR },
+		});
+		expect(effect).toEqual({ type: "escalate" });
+	});
+
+	test("an escalate verdict ends the Run immediately from the gate", () => {
+		const { state, effect } = transition(
+			reviewing(),
+			reviewEvent({
+				status: "escalate",
+				cycle: 1,
+				reason: "standards review escalated: conflicting guidance",
+			}),
+		);
+
+		expect(state).toEqual({
+			name: "escalated",
+			reason: "standards review escalated: conflicting guidance",
+			stage: "review",
+			cycle: 1,
+			facts: { branch: CLAIMED.branch, worktree: CLAIMED.worktree, pr: PR },
+		});
+		expect(effect).toEqual({ type: "escalate" });
 	});
 
 	test("a handed-off PR is handed-over-to-maintainer — the Engine stops", () => {
@@ -461,6 +549,7 @@ describe("Engine state machine: invariants", () => {
 			"bootstrap",
 			"cycle",
 			"candidate-push",
+			"review",
 			"handoff",
 			"escalate",
 		]);
@@ -470,6 +559,7 @@ describe("Engine state machine: invariants", () => {
 			cycling(1),
 			cycling(3),
 			publishing(),
+			reviewing(),
 			handingOff(),
 			{ name: "refused", reason: "x" },
 			{
@@ -492,7 +582,7 @@ describe("Engine state machine: invariants", () => {
 					pr: PR,
 					text: "b",
 				}),
-				cycleEvent(APPROVED),
+				cycleEvent(VERIFIED),
 				cycleEvent({ status: "failed", cycle: 1, reason: "f" }),
 				cycleEvent({ status: "escalate", cycle: 1, reason: "e" }),
 				candidatePushEvent({
@@ -503,6 +593,13 @@ describe("Engine state machine: invariants", () => {
 					head: "b",
 					text: "p",
 				}),
+				reviewEvent(DUAL_APPROVAL),
+				reviewEvent({
+					status: "changes-requested",
+					cycle: 1,
+					reason: "r",
+				}),
+				reviewEvent({ status: "escalate", cycle: 1, reason: "e" }),
 				handoffEvent({
 					status: "handed-off",
 					issue: 61,
