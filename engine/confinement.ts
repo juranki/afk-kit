@@ -148,7 +148,7 @@ function confinedEnvironment(
 	return env;
 }
 
-type SandboxRuntimePort = Pick<
+export type SandboxRuntimePort = Pick<
 	typeof SandboxManager,
 	| "initialize"
 	| "wrapWithSandbox"

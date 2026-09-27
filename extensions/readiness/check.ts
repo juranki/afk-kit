@@ -146,7 +146,7 @@ function checkOpenQuestions(body: string): Inspection {
 	};
 }
 
-function checkTriageLabels(labels: string[]): Inspection {
+export function checkTriageLabels(labels: string[]): Inspection {
 	const triage = labels.filter((label) =>
 		(TRIAGE_LABELS as readonly string[]).includes(label),
 	);
