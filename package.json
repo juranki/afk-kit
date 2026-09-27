@@ -3,6 +3,9 @@
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
+	"bin": {
+		"afk": "./engine/cli.ts"
+	},
 	"description": "AFK delivery toolkit for pi: coordinator mechanics and workflow skills",
 	"keywords": [
 		"pi-package"
