@@ -114,9 +114,9 @@ describe("requireDone", () => {
 		expect(requireDone({ status: "blocked", openQuestions: ["?"] })).toBe(
 			false,
 		);
-		expect(
-			requireDone({ status: "done", openQuestions: ["one open"] }),
-		).toBe(false);
+		expect(requireDone({ status: "done", openQuestions: ["one open"] })).toBe(
+			false,
+		);
 	});
 });
 

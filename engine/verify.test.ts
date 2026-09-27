@@ -14,9 +14,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
 	FEEDBACK_TAIL_CHARS,
-	type VerifyCommandEvidence,
 	formatVerifyFeedback,
 	runVerifyCommands,
+	type VerifyCommandEvidence,
 } from "./verify.ts";
 
 function scratchWorktree(): string {
@@ -89,7 +89,7 @@ describe("runVerifyCommands", () => {
 			commands: [
 				'test -z "$GH_TOKEN"',
 				'test -z "$GITHUB_TOKEN"',
-				'command -v bun >/dev/null',
+				"command -v bun >/dev/null",
 			],
 			worktree,
 			evidenceDir: path.join(worktree, "..", "verify-evidence"),
@@ -152,7 +152,7 @@ describe("formatVerifyFeedback (pure)", () => {
 		const feedback = formatVerifyFeedback([
 			evidence({
 				stdout: longOutput,
-				stderr: "e".repeat(FEEDBACK_TAIL_CHARS + 10) + "ERRTAIL",
+				stderr: `${"e".repeat(FEEDBACK_TAIL_CHARS + 10)}ERRTAIL`,
 			}),
 		]);
 		expect(feedback).toContain("`bun test`");

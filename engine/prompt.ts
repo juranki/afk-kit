@@ -67,9 +67,7 @@ function validate(value: unknown): ParsedImplementerResult {
  * Parse the Implementer's final output into its structured result.
  * Deterministic; never guesses and never throws.
  */
-export function parseImplementerResult(
-	text: string,
-): ParsedImplementerResult {
+export function parseImplementerResult(text: string): ParsedImplementerResult {
 	let invalid: string | null = null;
 	for (const candidate of candidatesOf(text)) {
 		const trimmed = candidate.trim();
@@ -119,9 +117,9 @@ export function buildImplementerPrompt(facts: ImplementerPromptFacts): string {
 	const lines: string[] = [
 		`You are the Implementer for issue #${facts.issue}, working alone inside the Ticket worktree.`,
 		"",
-		"- Worktree (your working directory): " + facts.worktree,
-		"- Branch (commit here, locally only): " + facts.branch,
-		"- Cycle: " + String(facts.cycle),
+		`- Worktree (your working directory): ${facts.worktree}`,
+		`- Branch (commit here, locally only): ${facts.branch}`,
+		`- Cycle: ${String(facts.cycle)}`,
 		"",
 	];
 	if (facts.cycle > 1) {

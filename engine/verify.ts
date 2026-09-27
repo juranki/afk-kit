@@ -13,7 +13,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 /** One verify command's wall-clock cap (durable spec #46). */
-export const VERIFY_COMMAND_CAP_MS = 15 * 60 * 1000;
+const VERIFY_COMMAND_CAP_MS = 15 * 60 * 1000;
 
 /** How much of each stream the bounded failed-cycle feedback carries. */
 export const FEEDBACK_TAIL_CHARS = 20_000;
@@ -71,7 +71,7 @@ export interface RunVerifyCommandsOptions {
 }
 
 /** Credential-free environment for one verify command. */
-export function verifyEnvironment(
+function verifyEnvironment(
 	parent: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
@@ -124,10 +124,11 @@ async function runOne(options: {
 		// verbatim after it.
 		["-lc", `PATH=${shellQuote(env.PATH ?? "")}; export PATH; ${command}`],
 		{
-		cwd: worktree,
-		env,
-		stdio: ["ignore", "pipe", "pipe"],
-	});
+			cwd: worktree,
+			env,
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	);
 	let stdout = "";
 	let stderr = "";
 	let timedOut = false;
@@ -223,10 +224,7 @@ function tail(text: string): string {
 		: text;
 }
 
-function streamSection(
-	label: string,
-	text: string,
-): string {
+function streamSection(label: string, text: string): string {
 	return [`--- ${label} (last ${FEEDBACK_TAIL_CHARS} chars) ---`, tail(text)];
 }
 
@@ -235,12 +233,9 @@ function streamSection(
  * characters of each stream, per executed command. This is what the next
  * fresh Implementer sees of a failed verify — never the full streams.
  */
-export function formatVerifyFeedback(
-	results: VerifyCommandEvidence[],
-): string {
+export function formatVerifyFeedback(results: VerifyCommandEvidence[]): string {
 	const lines: string[] = [];
 	for (const result of results) {
-		const timeouts = result.timedOut ? 1 : 0;
 		const how = result.timedOut
 			? `timed out after ${String(result.durationMs)}ms, 1 timeout`
 			: `exit ${String(result.exitCode)}, 0 timeouts`;
