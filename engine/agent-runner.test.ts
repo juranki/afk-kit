@@ -79,7 +79,10 @@ describe("runImplementerSession", () => {
 					session.emit({ type: "agent_start" });
 					session.emit({
 						type: "message_end",
-						message: { role: "assistant", content: [{ type: "text", text: "All done." }] },
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: "All done." }],
+						},
 					});
 					session.emit({ type: "agent_end" });
 					session.finish();
@@ -123,7 +126,8 @@ describe("runImplementerSession", () => {
 				try {
 					const text = fs.readFileSync(eventsPath, "utf8");
 					if (text.includes("first")) resolve();
-					else if (Date.now() > deadline) reject(new Error("first event never persisted"));
+					else if (Date.now() > deadline)
+						reject(new Error("first event never persisted"));
 					else setTimeout(poll, 5);
 				} catch {
 					if (Date.now() > deadline) reject(new Error("events file missing"));
@@ -167,7 +171,12 @@ describe("runImplementerSession", () => {
 			return session;
 		};
 		const outcome = await runImplementerSession(
-			{ worktree: dir, prompt: "p", eventsPath: path.join(dir, "e.jsonl"), capMs: 50 },
+			{
+				worktree: dir,
+				prompt: "p",
+				eventsPath: path.join(dir, "e.jsonl"),
+				capMs: 50,
+			},
 			{ createSession: factory },
 		);
 		expect(outcome.stop).toBe("aborted");

@@ -141,18 +141,28 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 			);
 		}
 
-		// Per-cycle confinement: the session's bash is allow-only,
-		// worktree-rooted, registry-networked. A confinement failure
-		// throws, and the driving loop escalates it.
+		// Per-cycle confinement: the session's bash is allow-only — writes
+		// stay inside the worktree, network reaches only the package
+		// registry, and the host's git configuration is isolated so a
+		// commit never reads (or inherits) anything of the maintainer's.
+		// All git state is worktree-local (claim creates an independent
+		// clone), so no shared-repo write surface exists to expose.
 		const confinement = await createTaskConfinement(
 			{
 				worktree,
 				writablePaths: ["."],
 				allowedDomains: [...IMPLEMENTER_ALLOWED_DOMAINS],
 			},
-			ports.confinementRuntime === undefined
-				? {}
-				: { runtime: ports.confinementRuntime },
+			{
+				extraEnv: {
+					GIT_CONFIG_GLOBAL: "/dev/null",
+					GIT_CONFIG_SYSTEM: "/dev/null",
+					GIT_TERMINAL_PROMPT: "0",
+				},
+				...(ports.confinementRuntime === undefined
+					? {}
+					: { runtime: ports.confinementRuntime }),
+			},
 		);
 		try {
 			const implementerDir = artifactDir(

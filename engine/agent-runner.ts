@@ -114,9 +114,7 @@ export async function runImplementerSession(
 					if (capFired) {
 						settleCapFired = true;
 						reject(
-							new Error(
-								"aborted session did not settle within 30 seconds",
-							),
+							new Error("aborted session did not settle within 30 seconds"),
 						);
 					}
 				}, ABORT_SETTLE_CAP_MS);
@@ -133,13 +131,16 @@ export async function runImplementerSession(
 	}
 	return {
 		stop: capFired ? "aborted" : "completed",
-		resultText: capFired || settleCapFired ? "" : session.getLastAssistantText(),
+		resultText:
+			capFired || settleCapFired ? "" : session.getLastAssistantText(),
 	};
 }
 
 /** The pins a package-owned agent definition carries in its frontmatter. */
 export interface AgentDefinition {
 	name?: string;
+	/** The provider carrying the pinned model id; model ids alone can be ambiguous. */
+	provider?: string;
 	model?: string;
 	thinking?: string;
 	tools: string[];
@@ -164,6 +165,7 @@ export function parseAgentDefinition(text: string): AgentDefinition {
 		const [, key, raw] = entry;
 		const value = (raw ?? "").trim();
 		if (key === "name") definition.name = value;
+		else if (key === "provider") definition.provider = value;
 		else if (key === "model") definition.model = value;
 		else if (key === "thinking") definition.thinking = value;
 		else if (key === "tools") {
@@ -197,13 +199,23 @@ export function createImplementerSessionFactory(
 	config: ImplementerSpawnConfig,
 ): SessionFactory {
 	return async (request) => {
-		const { createAgentSession, createBashToolDefinition, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } =
-			await import("@earendil-works/pi-coding-agent");
+		const {
+			createAgentSession,
+			createBashToolDefinition,
+			DefaultResourceLoader,
+			ModelRuntime,
+			SessionManager,
+			SettingsManager,
+		} = await import("@earendil-works/pi-coding-agent");
 		const definition = parseAgentDefinition(
 			fs.readFileSync(config.definitionPath, "utf8"),
 		);
 		const runtime = config.modelRuntime ?? (await ModelRuntime.create());
-		const model = resolvePinnedModel(runtime, definition.model);
+		const model = resolvePinnedModel(
+			runtime,
+			definition.provider,
+			definition.model,
+		);
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: request.worktree,
 			// Off-tree and unused: discovery is off and settings are in-memory.
@@ -240,35 +252,26 @@ export function createImplementerSessionFactory(
 type ResolvedModel = NonNullable<ReturnType<ModelRuntime["getModel"]>>;
 
 /**
- * Resolve the definition's pinned model id across providers.
- * Deterministic: exactly one provider must carry the id; ties are refused
- * rather than guessed.
+ * Resolve the definition's pinned provider/model pair. Deterministic: the
+ * definition pins the provider because a model id alone can be carried by
+ * several; a pin that resolves to nothing is a loud error, not a fallback.
  */
 function resolvePinnedModel(
 	runtime: ModelRuntime,
+	providerId: string | undefined,
 	modelId: string | undefined,
 ): ResolvedModel {
+	const provider = providerId?.trim();
 	const id = modelId?.trim();
+	if (provider === undefined || provider === "") {
+		throw new Error("implementer definition pins no provider");
+	}
 	if (id === undefined || id === "") {
 		throw new Error("implementer definition pins no model");
 	}
-	const providers = runtime
-		.getProviders()
-		.map((provider) => provider.id)
-		.sort();
-	const matches = providers.flatMap((providerId) => {
-		const model = runtime.getModel(providerId, id);
-		return model === undefined ? [] : [{ providerId, model }];
-	});
-	if (matches.length === 0) {
-		throw new Error(
-			`pinned implementer model not found: ${id} (providers: ${providers.join(", ")})`,
-		);
+	const model = runtime.getModel(provider, id);
+	if (model === undefined) {
+		throw new Error(`pinned implementer model not found: ${provider}/${id}`);
 	}
-	if (matches.length > 1) {
-		throw new Error(
-			`pinned implementer model is ambiguous: ${id} is offered by ${matches.map((m) => m.providerId).join(", ")}`,
-		);
-	}
-	return matches[0]?.model;
+	return model;
 }

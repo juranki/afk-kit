@@ -22,14 +22,19 @@ ticket's change (ontology invariant).
 ## Worktree
 
 - Located at `~/wt/<project>/issue-<n>-<slug>`, per the worktree convention in the
-  target repo's AGENTS.md (`git worktree add`).
+  target repo's AGENTS.md. Created by the claim op as an **independent clone**
+  (`git clone --no-checkout --no-hardlinks`, branch checked out at the fetched
+  `origin/main` SHA) — all of the worktree's git state lives inside it, so a
+  confined implementer can commit with no write surface in the primary
+  checkout's repository ([ADR 0014](../adr/0014-ticket-worktree-is-an-independent-clone.md)).
 - `<project>` derivation (canonical, implemented by the claim op): the origin remote's
   **repository name** — the last segment of `git remote get-url origin` after `/` (or
   `:`), with a trailing `.git` stripped. `git@github.com:juranki/afk-kit.git`,
   `https://github.com/juranki/afk-kit`, and a local `.../afk-kit.git` all derive
   `afk-kit`.
 - The implementer subagent works inside the worktree; the branch is checked out there
-  and nowhere else.
+  and nowhere else, and its commits carry the Engine's pinned identity, never the
+  maintainer's git configuration.
 - Worktrees are preserved on escalation so partial work stays inspectable; they are
   removed only after the PR merges or the maintainer says so.
 

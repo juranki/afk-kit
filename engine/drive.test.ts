@@ -301,9 +301,11 @@ describe("driveRun: the approved path", () => {
 		const head = await world.git(["rev-parse", "HEAD"], worktree);
 		const remote = await world.git(["rev-parse", `origin/${BRANCH}`], worktree);
 		expect(remote.stdout.trim()).toBe(head.stdout.trim());
+		// The worktree is an independent clone (ADR 0014): the branch lives
+		// there, and the pushed remote carries the cumulative candidate.
 		const count = await world.git(
-			["rev-list", "--count", `origin/main..${BRANCH}`],
-			world.checkout,
+			["rev-list", "--count", `origin/main..origin/${BRANCH}`],
+			worktree,
 		);
 		expect(Number(count.stdout.trim())).toBeGreaterThanOrEqual(2);
 	});
