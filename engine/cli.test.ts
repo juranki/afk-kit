@@ -11,10 +11,50 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { parseStatusArgs, runCli } from "./cli.ts";
+import { parseImplementArgs, parseStatusArgs, runCli } from "./cli.ts";
 import { RUN_EVENT_NAMES } from "./runs/events.ts";
 import { afkStateRoot } from "./runs/paths.ts";
 import { createRun, recordEvent } from "./runs/store.ts";
+
+describe("parseImplementArgs", () => {
+	test("accepts exactly one bare positive integer", () => {
+		expect(parseImplementArgs(["60"])).toEqual({ ticket: 60 });
+	});
+
+	test("rejects hashes, URLs, ranges, signs, zero, leading zeros, flags, and extra arguments", () => {
+		expect(parseImplementArgs(["#60"])).toBeNull();
+		expect(
+			parseImplementArgs(["https://github.com/juranki/afk-kit/issues/60"]),
+		).toBeNull();
+		expect(parseImplementArgs(["60..61"])).toBeNull();
+		expect(parseImplementArgs(["-1"])).toBeNull();
+		expect(parseImplementArgs(["+60"])).toBeNull();
+		expect(parseImplementArgs(["0"])).toBeNull();
+		expect(parseImplementArgs(["060"])).toBeNull();
+		expect(parseImplementArgs(["--force"])).toBeNull();
+		expect(parseImplementArgs(["60", "61"])).toBeNull();
+	});
+
+	test("rejects a missing argument — implement takes no default", () => {
+		expect(parseImplementArgs([])).toBeNull();
+	});
+
+	test("usage errors exit 2 with usage on stderr", async () => {
+		const bad = io(checkout());
+		expect(await runCli(["implement", "#60"], bad.io)).toBe(2);
+		expect(bad.err.join("")).toContain("usage");
+
+		const missing = io(checkout());
+		expect(await runCli(["implement"], missing.io)).toBe(2);
+		expect(missing.err.join("")).toContain("usage");
+	});
+
+	test("usage lists the implement command", () => {
+		const { io: cliIo, out } = io(checkout());
+		void runCli(["help"], cliIo);
+		expect(out.join("")).toContain("implement");
+	});
+});
 
 describe("parseStatusArgs", () => {
 	test("accepts no argument — every Run for the repository", () => {

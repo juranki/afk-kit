@@ -9,6 +9,7 @@
  * durable Escalation could not complete.
  */
 
+import { runImplement } from "./implement.ts";
 import { afkStateRoot } from "./runs/paths.ts";
 import {
 	collectStatus,
@@ -20,6 +21,8 @@ import {
 const USAGE = `usage: afk <command> [args]
 
 commands:
+  implement <issue-number> start the durable Engine Run for one Ticket
+                          (a single bare positive integer)
   status [issue-number]   show Runs for this repository, or one Ticket
                           (a single bare positive integer)
 
@@ -47,6 +50,33 @@ export function parseStatusArgs(args: string[]): { ticket?: number } | null {
 	const raw = args[0] ?? "";
 	if (!/^[1-9][0-9]*$/.test(raw)) return null;
 	return { ticket: Number(raw) };
+}
+
+/**
+ * Parse `implement` arguments: exactly one bare positive integer. Hashes,
+ * URLs, signs, ranges, zero, leading zeros, flags, extra arguments, and a
+ * missing argument are refused — the Engine starts exactly one Ticket, and
+ * only when named unambiguously (durable spec #46, ticket #60).
+ */
+export function parseImplementArgs(args: string[]): { ticket: number } | null {
+	if (args.length !== 1) return null;
+	const raw = args[0] ?? "";
+	if (!/^[1-9][0-9]*$/.test(raw)) return null;
+	return { ticket: Number(raw) };
+}
+
+async function implementCommand(args: string[], io: CliIo): Promise<number> {
+	const parsed = parseImplementArgs(args);
+	if (parsed === null) {
+		io.stderr(USAGE);
+		return 2;
+	}
+	return runImplement({
+		ticket: parsed.ticket,
+		cwd: io.cwd,
+		env: io.env,
+		io,
+	});
 }
 
 async function statusCommand(args: string[], io: CliIo): Promise<number> {
@@ -80,6 +110,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 	switch (command) {
 		case "status":
 			return statusCommand(args, io);
+		case "implement":
+			return implementCommand(args, io);
 		case "help":
 		case "--help":
 		case "-h":

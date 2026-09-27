@@ -26,6 +26,8 @@ export const RUN_EVENT_NAMES = {
 	started: "run.started",
 	/** Run-scoped facts became known; payload: `{ pr?, branch?, worktree? }`. */
 	context: "run.context",
+	/** A diagnostic that changes no state; payload: `{ message }`. */
+	notice: "run.notice",
 	/** The Run entered a stage; payload: `{ stage }`. */
 	stageEntered: "stage.entered",
 	/** An Implement–Review cycle began; payload: `{ cycle }`. */
