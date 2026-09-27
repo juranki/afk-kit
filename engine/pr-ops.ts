@@ -28,8 +28,6 @@ import { parseBrief } from "../extensions/readiness/brief.ts";
 import { verifyCommandList } from "../extensions/readiness/check.ts";
 import type { EngineSeams, PrRef } from "./seams.ts";
 
-export type { VerifyResult } from "../extensions/coordinator/prbody.ts";
-
 const ISSUE_BRANCH = /^issue-(\d+)-/;
 
 export interface BootstrapInput {

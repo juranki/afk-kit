@@ -22,7 +22,7 @@ export interface GhRule {
 	stdout?: string;
 }
 
-export const GH_STUB = `#!/usr/bin/env bun
+const GH_STUB = `#!/usr/bin/env bun
 import * as fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_STUB_LOG!, JSON.stringify(args) + "\\n");
@@ -58,7 +58,7 @@ export interface World {
 	setRules: (rules: GhRule[]) => void;
 }
 
-export function sh(cwd: string, command: string): Promise<void> {
+function sh(cwd: string, command: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const child = spawn("bash", ["-c", command], { cwd, stdio: "pipe" });
 		child.on("error", reject);
@@ -147,7 +147,7 @@ export async function makeWorld(
 
 /** Rules every world can fall back to: an authenticated maintainer, a clean
  * claimable issue, and successful tracker writes. */
-export function baseRules(issue: number, title: string): GhRule[] {
+function baseRules(issue: number, title: string): GhRule[] {
 	return [
 		{ args: ["api", "user"], json: { login: "maintainer" } },
 		{
