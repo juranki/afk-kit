@@ -146,8 +146,9 @@ export async function makeWorld(
 }
 
 /** Rules every world can fall back to: an authenticated maintainer, a clean
- * claimable issue, and successful tracker writes. */
-function baseRules(issue: number, title: string): GhRule[] {
+ * claimable issue, and successful tracker writes. Drivers that swap rules
+ * mid-flight (drive.ts tests) recompose with these. */
+export function baseRules(issue: number, title: string): GhRule[] {
 	return [
 		{ args: ["api", "user"], json: { login: "maintainer" } },
 		{
