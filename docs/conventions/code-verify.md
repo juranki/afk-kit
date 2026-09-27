@@ -45,6 +45,11 @@ breaks.
 - Tests are **colocated** as `*.test.ts` beside the code or public package seam
   they test. The pi manifest loads only its listed extensions and skills, so tests
   never load at runtime.
+- **Prototype directories are outside the sweep.** `prototype/*/run/` holds
+  throwaway evidence from experiments; its fixtures intentionally fail or
+  violate format (e.g. r45-sdk-spawn's seeded ticket-drill bug) and are
+  evidence, not product code. `bunfig.toml` excludes `prototype` from test
+  discovery and `biome.jsonc` from lint/format.
 - Every deterministic decision gets L1 tests; every coordinator operation gets L2.
 - **No coverage-percentage gate.** The layer rules above are the gate; nothing
   ceremonial sits on top.

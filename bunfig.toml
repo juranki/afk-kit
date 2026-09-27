@@ -1,0 +1,6 @@
+# Test discovery covers product code only. Prototype run/ directories are
+# throwaway evidence archives — their *.test.ts fixtures intentionally fail
+# (e.g. r45-sdk-spawn's seeded "ticket drill" bug) and must stay untouched.
+# See docs/conventions/code-verify.md.
+[test]
+pathIgnorePatterns = ["prototype/**"]

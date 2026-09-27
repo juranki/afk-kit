@@ -3,7 +3,9 @@
 	// each addition carries a comment saying why.
 	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
 	"files": {
-		"includes": ["**"]
+		// Prototype run/ directories are throwaway evidence archives; their
+		// logs and transcripts are machine-generated and must not be reformatted.
+		"includes": ["**", "!prototype"]
 	},
 	"formatter": {
 		"enabled": true
