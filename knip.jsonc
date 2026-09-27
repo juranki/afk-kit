@@ -7,10 +7,8 @@
 	"entry": [
 		"extensions/readiness/index.ts",
 		"extensions/coordinator/index.ts",
-		"extensions/merge-guard/index.ts",
 		"scripts/**/*.test.ts",
 		"extensions/readiness/**/*.test.ts",
-		"extensions/coordinator/**/*.test.ts",
-		"extensions/merge-guard/**/*.test.ts"
+		"extensions/coordinator/**/*.test.ts"
 	]
 }
