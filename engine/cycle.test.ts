@@ -11,10 +11,12 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { slugFor } from "../extensions/coordinator/slug.ts";
-import { createCyclePort } from "./cycle.ts";
+import { createCyclePort, priorFeedback } from "./cycle.ts";
 import { driveRun } from "./drive.ts";
+import type { ReviewOutcome } from "./ports.ts";
 import { type RunEvent, readRunEvents } from "./runs/events.ts";
 import { foldRunEvents } from "./runs/projection.ts";
 import { createRun, type RunHandle } from "./runs/store.ts";
@@ -271,6 +273,8 @@ interface RunDrivenOptions {
 	implementerCapMs?: number;
 	/** The scripted session's final text; default the done report. */
 	report?: string;
+	/** Per-cycle scripted Review outcomes; default dual approval. */
+	reviews?: (cycle: number) => ReviewOutcome;
 }
 
 async function runDrivenWorld(
@@ -301,15 +305,18 @@ async function runDrivenWorld(
 		seams: started.world.seams,
 		runCycle: port,
 		// The cycle tests judge the Implement–Verify leg; a scripted dual
-		// approval keeps the Review gate out of their way.
-		runReviews: async (cycle) => ({
-			status: "approved",
-			cycle,
-			approvals: [
-				{ review: "standards", verdict: { verdict: "approve" } },
-				{ review: "spec", verdict: { verdict: "approve" } },
-			],
-		}),
+		// approval keeps the Review gate out of their way unless the test
+		// scripts the gate's outcomes itself.
+		runReviews:
+			options.reviews ??
+			(async (cycle) => ({
+				status: "approved",
+				cycle,
+				approvals: [
+					{ review: "standards", verdict: { verdict: "approve" } },
+					{ review: "spec", verdict: { verdict: "approve" } },
+				],
+			})),
 		io: {
 			stdout: () => {},
 			stderr: (t) => {
@@ -619,5 +626,221 @@ describe("createCyclePort: failed cycles", () => {
 		expect(summary?.reason).toContain("sandbox runtime cannot initialize");
 		// No Implementer session was ever launched.
 		expect(result.started.launched).toHaveLength(0);
+	});
+});
+
+/** Seed one prior cycle's persisted results under a temp artifacts dir. */
+function seedCycle(
+	artifactsDir: string,
+	cycle: number,
+	result: { status: string; cycle: number; reason: string } | null,
+	review: { status: string; cycle: number; reason: string } | null,
+	dirs: string[] = [],
+): string {
+	const dir = path.join(artifactsDir, `cycle-${String(cycle)}`);
+	fs.mkdirSync(dir, { recursive: true });
+	for (const sub of dirs)
+		fs.mkdirSync(path.join(dir, sub), { recursive: true });
+	if (result !== null) {
+		fs.writeFileSync(
+			path.join(dir, "result.json"),
+			`${JSON.stringify(result, null, "\t")}\n`,
+		);
+	}
+	if (review !== null) {
+		fs.writeFileSync(
+			path.join(dir, "review-result.json"),
+			`${JSON.stringify(review, null, "\t")}\n`,
+		);
+	}
+	return dir;
+}
+
+describe("priorFeedback: bounded aggregation of failed-cycle evidence (L1)", () => {
+	test("a failed cycle rides in with its reason and its evidence paths", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "afk-feedback-"));
+		try {
+			const cycle1 = seedCycle(
+				dir,
+				1,
+				{
+					status: "failed",
+					cycle: 1,
+					reason: "Verify command `bun test` failed (exit 1, 0 timeouts)",
+				},
+				null,
+				["implementer", "verify"],
+			);
+			const feedback = priorFeedback(dir, 2);
+			expect(feedback).toContain(
+				"Cycle 1 failed: Verify command `bun test` failed (exit 1, 0 timeouts)",
+			);
+			expect(feedback).toContain(
+				`Evidence: ${path.join(cycle1, "result.json")}, ${path.join(cycle1, "implementer")}, ${path.join(cycle1, "verify")}`,
+			);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("requested changes ride in with their findings and the review evidence", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "afk-feedback-"));
+		try {
+			const cycle1 = seedCycle(
+				dir,
+				1,
+				null,
+				{
+					status: "changes-requested",
+					cycle: 1,
+					reason: "standards review requests changes: no tests for the gate",
+				},
+				["reviews"],
+			);
+			const feedback = priorFeedback(dir, 2);
+			expect(feedback).toContain(
+				"Cycle 1 review requested changes: standards review requests changes: no tests for the gate",
+			);
+			expect(feedback).toContain(
+				`Evidence: ${path.join(cycle1, "review-result.json")}, ${path.join(cycle1, "reviews")}`,
+			);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("passing cycles contribute no feedback", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "afk-feedback-"));
+		try {
+			seedCycle(
+				dir,
+				1,
+				{ status: "verified", cycle: 1 },
+				{ status: "approved", cycle: 1 },
+			);
+			expect(priorFeedback(dir, 2)).toBeUndefined();
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a missing prior result is not feedback", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "afk-feedback-"));
+		try {
+			expect(priorFeedback(dir, 2)).toBeUndefined();
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("cycles aggregate in ascending order, failures and findings together", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "afk-feedback-"));
+		try {
+			seedCycle(
+				dir,
+				1,
+				{ status: "failed", cycle: 1, reason: "first failure" },
+				{ status: "changes-requested", cycle: 1, reason: "first findings" },
+			);
+			seedCycle(
+				dir,
+				2,
+				{ status: "failed", cycle: 2, reason: "second failure" },
+				null,
+			);
+			const feedback = priorFeedback(dir, 3) ?? "";
+			const first = feedback.indexOf("Cycle 1 failed: first failure");
+			const second = feedback.indexOf(
+				"Cycle 1 review requested changes: first findings",
+			);
+			const third = feedback.indexOf("Cycle 2 failed: second failure");
+			expect(first).toBeGreaterThanOrEqual(0);
+			expect(second).toBeGreaterThan(first);
+			expect(third).toBeGreaterThan(second);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("createCyclePort: the Review gate's findings route into the next fresh prompt", () => {
+	const FINDINGS = [
+		"standards review requests changes: the gate ships without tests",
+		"- [blocker] src/gate.ts: the happy path is untested",
+		"- [major] src/gate.ts: the refusal path is unhandled",
+		"- [minor] README.md: the new flag is undocumented",
+	].join("\n");
+	let result: RunResult;
+
+	beforeAll(async () => {
+		result = await runDrivenWorld({
+			behavior: async (cycle, worktree, git) => {
+				// Unique content per cycle: every cycle leaves a new commit.
+				fs.mkdirSync(path.join(worktree, "src"), { recursive: true });
+				fs.writeFileSync(
+					path.join(worktree, "src", "feature.txt"),
+					`done in cycle ${String(cycle)}\n`,
+				);
+				const add = await git(["add", "-A"], worktree);
+				if (add.exitCode !== 0) throw new Error(add.stderr);
+				const commit = await git(
+					["commit", "-m", `implement the feature (${String(cycle)})`],
+					worktree,
+				);
+				if (commit.exitCode !== 0) throw new Error(commit.stderr);
+			},
+			reviews: (cycle) =>
+				cycle === 1
+					? { status: "changes-requested", cycle, reason: FINDINGS }
+					: {
+							status: "approved",
+							cycle,
+							approvals: [
+								{ review: "standards", verdict: { verdict: "approve" } },
+								{ review: "spec", verdict: { verdict: "approve" } },
+							],
+						},
+		});
+	});
+
+	afterAll(() => cleanupWorld(result.started.world));
+
+	test("the requested changes reached cycle 2's fresh Implementer verbatim", () => {
+		expect(result.exit).toBe(0);
+		expect(result.started.launched).toHaveLength(2);
+		const prompt2 = result.started.launched[1]?.prompt ?? "";
+		expect(prompt2).toContain("Previous-cycle feedback");
+		for (const line of FINDINGS.split("\n")) {
+			expect(prompt2).toContain(line);
+		}
+	});
+
+	test("the prompt references the retained review evidence by path", () => {
+		const prompt2 = result.started.launched[1]?.prompt ?? "";
+		expect(prompt2).toContain(
+			path.join(
+				result.started.handle.artifactsDir,
+				"cycle-1",
+				"review-result.json",
+			),
+		);
+	});
+
+	test("cycle 1's gate outcome is retained and cycle 2 handed the Run over", () => {
+		const retained = JSON.parse(
+			fs.readFileSync(
+				path.join(
+					result.started.handle.artifactsDir,
+					"cycle-1",
+					"review-result.json",
+				),
+				"utf8",
+			),
+		) as { status: string; reason: string };
+		expect(retained.status).toBe("changes-requested");
+		expect(retained.reason).toBe(FINDINGS);
+		const summary = foldRunEvents(result.events);
+		expect(summary?.outcome).toBe("handed-over-to-maintainer");
+		expect(summary?.cycle).toBe(2);
 	});
 });

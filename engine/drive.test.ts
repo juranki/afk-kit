@@ -560,6 +560,13 @@ describe("driveRun: three failed cycles exhaust the cap", () => {
 		const comment = argv.find((args) => args.includes("issue comment"));
 		expect(comment).toContain("cycle 3");
 	});
+
+	test("the Escalation posts exactly one status comment", () => {
+		const comments = s.world
+			.argvLog()
+			.filter((args) => args.includes("issue comment"));
+		expect(comments).toHaveLength(1);
+	});
 });
 
 describe("driveRun: the Review gate routes findings into the next cycle", () => {
@@ -830,5 +837,89 @@ describe("driveRun: a live lock refuses the drive", () => {
 			(e) => e.name === RUN_EVENT_NAMES.outcome,
 		).length;
 		expect(outcomesAfter).toBe(outcomesBefore);
+	});
+});
+
+describe("driveRun: an evidence-persistence failure escalates immediately", () => {
+	let world: Awaited<ReturnType<typeof makeWorld>>;
+	let handle: RunHandle;
+	const launched: number[] = [];
+	let exit: 0 | 1 | 2 | 3;
+
+	beforeAll(async () => {
+		world = await makeWorld(ISSUE, TITLE, [
+			...bootstrapRules(),
+			...escalationRules(),
+		]);
+		handle = startRun(world);
+		// Sabotage the cycle-evidence directory: a plain file sits where the
+		// cycle-1 evidence directory must be created.
+		fs.writeFileSync(
+			path.join(handle.artifactsDir, "cycle-1"),
+			"not a directory\n",
+		);
+		const wt = worktreeFor(world);
+		exit = await driveRun({
+			handle,
+			seams: world.seams,
+			runCycle: async (cycle) => {
+				launched.push(cycle);
+				fs.writeFileSync(path.join(wt, "candidate.txt"), `cycle ${cycle}\n`);
+				const add = await world.git(["add", "-A"], wt);
+				if (add.exitCode !== 0) throw new Error(add.stderr);
+				const commit = await world.git(
+					["commit", "-m", `candidate for cycle ${cycle}`],
+					wt,
+				);
+				if (commit.exitCode !== 0) throw new Error(commit.stderr);
+				world.setRules([
+					...handoffRules(),
+					...escalationRules(),
+					...baseRules(ISSUE, TITLE),
+				]);
+				return {
+					status: "verified",
+					cycle,
+					verifyResults: [{ command: "bun test", ok: true }],
+				};
+			},
+			runReviews: neverReviews(),
+			io: { stdout: () => {}, stderr: () => {} },
+		});
+	});
+
+	afterAll(() => cleanupWorld(world));
+
+	test("the Run escalates with exit 2 instead of crashing", () => {
+		expect(exit).toBe(2);
+		const outcome = outcomeEvent(handle);
+		expect(outcome?.payload.outcome).toBe("escalated");
+		expect(outcome?.payload.stage).toBe("cycle");
+		expect(outcome?.payload.cycle).toBe(1);
+		expect(outcome?.payload.reason).toContain("cannot persist cycle evidence");
+	});
+
+	test("no further cycle launched — the evidence trail is broken", () => {
+		expect(launched).toEqual([1]);
+	});
+
+	test("the completed cycle operation records the evidence refusal", () => {
+		const completed = eventsOf(handle).find(
+			(e) =>
+				e.name === RUN_EVENT_NAMES.sideEffectCompleted &&
+				e.payload.operation === "cycle",
+		);
+		expect(completed?.payload.status).toBe("verified");
+		expect(completed?.payload.text).toContain(
+			"EVIDENCE_REFUSAL: cannot persist cycle evidence",
+		);
+	});
+
+	test("the Escalation comment names the persistence failure — exactly once", () => {
+		const comments = world
+			.argvLog()
+			.filter((args) => args.includes("issue comment"));
+		expect(comments).toHaveLength(1);
+		expect(comments[0]).toContain("cannot persist cycle evidence");
 	});
 });

@@ -364,28 +364,59 @@ async function driveLocked(
 			outcome = outcomeFromThrow(effect, error, handle.ticket);
 		}
 
+		// Evidence persistence: a cycle's or Review's structured result is
+		// written verbatim before the machine decides. A persistence failure
+		// breaks the Run's evidence trail, so the Run escalates immediately
+		// (ticket afk-kit #64) instead of continuing without its evidence.
+		let artifacts: string[] = [];
+		let evidenceRefusal: string | null = null;
+		if (effect.type === "cycle" || effect.type === "review") {
+			try {
+				artifacts =
+					effect.type === "cycle"
+						? persistCycleResult(handle, effect.cycle, outcome)
+						: persistReviewResult(handle, effect.cycle, outcome);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				evidenceRefusal = `cannot persist ${effect.type} evidence: ${message}`;
+			}
+		}
+
 		const completion: Record<string, unknown> = {
 			operation: intentPayload(effect).operation,
 			status: outcome.status,
 		};
-		if (
+		if (evidenceRefusal !== null) {
+			completion.text = `EVIDENCE_REFUSAL: ${evidenceRefusal}`;
+		} else if (
 			"text" in outcome &&
 			typeof outcome.text === "string" &&
 			outcome.text !== ""
 		) {
 			completion.text = outcome.text;
 		}
-		const artifacts =
-			effect.type === "cycle"
-				? persistCycleResult(handle, effect.cycle, outcome)
-				: effect.type === "review"
-					? persistReviewResult(handle, effect.cycle, outcome)
-					: [];
 		emit(RUN_EVENT_NAMES.sideEffectCompleted, completion, {
 			cycle: inCycle,
 			op: id,
 			artifacts,
 		});
+
+		// The evidence trail is broken: the machine decides the escalation
+		// through its ordinary path — the Run never continues without its
+		// evidence (ticket afk-kit #64, durable spec #46).
+		if (evidenceRefusal !== null) {
+			const failedCycle =
+				effect.type === "cycle" || effect.type === "review"
+					? effect.cycle
+					: null;
+			if (failedCycle !== null) {
+				outcome = {
+					status: "escalate",
+					cycle: failedCycle,
+					reason: evidenceRefusal,
+				};
+			}
+		}
 
 		// Run-scoped facts become known: record them for the projection.
 		if (effect.type === "claim" && outcome.status === "claimed") {

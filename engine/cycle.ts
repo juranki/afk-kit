@@ -86,35 +86,69 @@ function verifyCommandsOf(brief: string): string[] {
 }
 
 /**
- * Prior failed cycles' bounded feedback, from the results the driving
- * loop persists; the next fresh Implementer inherits them all — both the
- * Implement–Verify failures and the Review gate's requested changes.
+ * Prior failed cycles' bounded feedback, aggregated from the results the
+ * driving loop persists (ticket afk-kit #64): every failed Implement–Verify
+ * leg and every changes-requested Review round becomes one entry — the
+ * reason verbatim (already bounded: verify feedback carries a 20,000-char
+ * stream tail, Review findings their structured rendering) plus the
+ * evidence artifact paths, so the next fresh Implementer can read the
+ * complete evidence for itself. A cycle whose results passed, or whose
+ * results are missing, contributes nothing.
  */
-function priorFeedback(handle: RunHandle, cycle: number): string | undefined {
-	const parts: string[] = [];
+export function priorFeedback(
+	artifactsDir: string,
+	cycle: number,
+): string | undefined {
+	const entries: string[] = [];
 	for (let prior = 1; prior < cycle; prior += 1) {
-		const dir = path.join(handle.artifactsDir, `cycle-${String(prior)}`);
-		for (const file of ["result.json", "review-result.json"]) {
-			try {
-				const outcome = JSON.parse(
-					fs.readFileSync(path.join(dir, file), "utf8"),
-				) as {
-					status?: string;
-					reason?: string;
-				};
-				if (
-					(outcome.status === "failed" ||
-						outcome.status === "changes-requested") &&
-					outcome.reason
-				) {
-					parts.push(outcome.reason);
-				}
-			} catch {
-				// A missing prior result is not feedback; the cycle proceeds.
-			}
+		const dir = path.join(artifactsDir, `cycle-${String(prior)}`);
+		for (const kind of FEEDBACK_KINDS) {
+			const entry = feedbackEntry(dir, prior, kind);
+			if (entry !== null) entries.push(entry);
 		}
 	}
-	return parts.length === 0 ? undefined : parts.join("\n\n");
+	return entries.length === 0 ? undefined : entries.join("\n\n");
+}
+
+/** One persisted result's feedback role, in loop order. */
+const FEEDBACK_KINDS = [
+	{
+		file: "result.json",
+		status: "failed",
+		label: (cycle: number): string => `Cycle ${String(cycle)} failed`,
+		/** Sibling evidence directories worth referencing when present. */
+		evidenceDirs: ["implementer", "verify"],
+	},
+	{
+		file: "review-result.json",
+		status: "changes-requested",
+		label: (cycle: number): string =>
+			`Cycle ${String(cycle)} review requested changes`,
+		evidenceDirs: ["reviews"],
+	},
+] as const;
+
+/** One persisted result's feedback entry, or null when it is none. */
+function feedbackEntry(
+	cycleDir: string,
+	prior: number,
+	kind: (typeof FEEDBACK_KINDS)[number],
+): string | null {
+	let outcome: { status?: string; reason?: string };
+	try {
+		outcome = JSON.parse(
+			fs.readFileSync(path.join(cycleDir, kind.file), "utf8"),
+		) as { status?: string; reason?: string };
+	} catch {
+		return null; // A missing prior result is not feedback; the cycle proceeds.
+	}
+	if (outcome.status !== kind.status || !outcome.reason) return null;
+	const evidence = [path.join(cycleDir, kind.file)];
+	for (const sub of kind.evidenceDirs) {
+		const dir = path.join(cycleDir, sub);
+		if (fs.existsSync(dir)) evidence.push(dir);
+	}
+	return `${kind.label(prior)}: ${outcome.reason}\nEvidence: ${evidence.join(", ")}`;
 }
 
 /**
@@ -195,7 +229,7 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 						worktree,
 						cycle,
 						brief,
-						feedback: priorFeedback(handle, cycle),
+						feedback: priorFeedback(handle.artifactsDir, cycle),
 					}),
 					eventsPath: path.join(implementerDir, "session-events.jsonl"),
 					capMs: ports.implementerCapMs ?? IMPLEMENTER_CAP_MS,
