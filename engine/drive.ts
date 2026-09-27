@@ -25,7 +25,7 @@ import {
 	startState,
 	transition,
 } from "./machine.ts";
-import type { CycleOutcome, CyclePort } from "./ports.ts";
+import type { CycleOutcome, CyclePort, ReviewPort } from "./ports.ts";
 import {
 	type BootstrapOutcome,
 	bootstrapDraftPr,
@@ -56,8 +56,10 @@ export interface DriveOptions {
 	/** The Run to drive; its immutable brief snapshot is never touched. */
 	handle: RunHandle;
 	seams: EngineSeams;
-	/** The Implement–Review Cycle port (scripted in #61, real in #62). */
+	/** The Implement–Verify port (scripted in #61, real in #62). */
 	runCycle: CyclePort;
+	/** The parallel Standards/Spec Review port over the pushed diff (#63). */
+	runReviews: ReviewPort;
 	io?: DriveIo;
 }
 
@@ -80,6 +82,7 @@ type OpOutcome =
 	| BootstrapOutcome
 	| CycleOutcome
 	| CandidatePushOutcome
+	| ReviewOutcome
 	| HandOffOutcome;
 
 /** Which side effect an intent/completed pair names. */
@@ -88,6 +91,7 @@ const OP_NAMES = {
 	bootstrap: "bootstrap",
 	cycle: "cycle",
 	"candidate-push": "candidate-push",
+	review: "review",
 	handoff: "handoff",
 	escalate: "escalate",
 } as const;
@@ -106,6 +110,8 @@ function opId(effect: MachineEffect, ticket: number): string {
 			return `${OP_NAMES.cycle}:${ticket}:${effect.cycle}`;
 		case "candidate-push":
 			return `${OP_NAMES["candidate-push"]}:${ticket}`;
+		case "review":
+			return `${OP_NAMES.review}:${ticket}:${effect.cycle}`;
 		case "handoff":
 			return `${OP_NAMES.handoff}:${ticket}`;
 		case "escalate":
@@ -132,6 +138,8 @@ function intentPayload(effect: MachineEffect): Record<string, unknown> {
 				issue: effect.input.issue,
 				branch: effect.input.branch,
 			};
+		case "review":
+			return { operation: OP_NAMES.review, cycle: effect.cycle };
 		case "handoff":
 			return {
 				operation: OP_NAMES.handoff,
@@ -177,6 +185,12 @@ function outcomeFromThrow(
 				issue: ticket,
 				text: `PUBLISH_REFUSAL: candidate push failed: ${message}`,
 			};
+		case "review":
+			return {
+				status: "escalate",
+				cycle: effect.cycle,
+				reason: message,
+			};
 		case "handoff":
 			return {
 				status: "refused",
@@ -203,6 +217,8 @@ function eventFor(
 				type: "candidate-push",
 				outcome: outcome as CandidatePushOutcome,
 			};
+		case "review":
+			return { type: "review", outcome: outcome as ReviewOutcome };
 		case "handoff":
 			return { type: "handoff", outcome: outcome as HandOffOutcome };
 	}
@@ -221,7 +237,7 @@ function stageOf(state: MachineState): string | null {
 }
 
 export async function driveRun(options: DriveOptions): Promise<DriveExit> {
-	const { handle, seams, runCycle } = options;
+	const { handle, seams, runCycle, runReviews } = options;
 	const io: DriveIo = options.io ?? {
 		stdout: (text) => process.stdout.write(text),
 		stderr: (text) => process.stderr.write(text),
@@ -239,7 +255,7 @@ export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 	}
 
 	try {
-		return await driveLocked(handle, seams, runCycle, io);
+		return await driveLocked(handle, seams, runCycle, runReviews, io);
 	} finally {
 		releaseRunLock(lock, handle);
 	}
@@ -249,6 +265,7 @@ async function driveLocked(
 	handle: RunHandle,
 	seams: EngineSeams,
 	runCycle: CyclePort,
+	runReviews: ReviewPort,
 	io: DriveIo,
 ): Promise<DriveExit> {
 	const emit = (
@@ -324,6 +341,7 @@ async function driveLocked(
 		const inCycle =
 			state.name === "cycle" ||
 			state.name === "publish" ||
+			state.name === "review" ||
 			state.name === "handoff"
 				? state.cycle
 				: null;
@@ -335,7 +353,13 @@ async function driveLocked(
 
 		let outcome: OpOutcome;
 		try {
-			outcome = await executeEffect(handle, effect, seams, runCycle);
+			outcome = await executeEffect(
+				handle,
+				effect,
+				seams,
+				runCycle,
+				runReviews,
+			);
 		} catch (error) {
 			outcome = outcomeFromThrow(effect, error, handle.ticket);
 		}
@@ -354,7 +378,9 @@ async function driveLocked(
 		const artifacts =
 			effect.type === "cycle"
 				? persistCycleResult(handle, effect.cycle, outcome)
-				: [];
+				: effect.type === "review"
+					? persistReviewResult(handle, effect.cycle, outcome)
+					: [];
 		emit(RUN_EVENT_NAMES.sideEffectCompleted, completion, {
 			cycle: inCycle,
 			op: id,
@@ -416,6 +442,7 @@ async function executeEffect(
 	effect: Exclude<MachineEffect, { type: "escalate" }>,
 	seams: EngineSeams,
 	runCycle: CyclePort,
+	runReviews: ReviewPort,
 ): Promise<OpOutcome> {
 	switch (effect.type) {
 		case "claim":
@@ -426,13 +453,15 @@ async function executeEffect(
 			return runCycle(effect.cycle);
 		case "candidate-push":
 			return pushCandidate(effect.input, seams);
+		case "review":
+			return runReviews(effect.cycle);
 		case "handoff":
 			return handOffPr(effect.input, seams);
 	}
 }
 
 /**
- * Persist the cycle's structured result verbatim — approved evidence,
+ * Persist the cycle's structured result verbatim — verified evidence,
  * failure feedback, or the escalate verdict — as a Run artifact; nothing
  * about a cycle is ever discarded.
  */
@@ -448,6 +477,26 @@ function persistCycleResult(
 		{ mode: 0o600 },
 	);
 	return [`cycle-${cycle}/result.json`];
+}
+
+/**
+ * Persist the Review gate's structured outcome verbatim — the dual
+ * approval, the requested changes, or the escalate verdict — as a Run
+ * artifact beside the cycle's own (ticket #63); nothing about a Review
+ * round is ever discarded.
+ */
+function persistReviewResult(
+	handle: RunHandle,
+	cycle: number,
+	outcome: OpOutcome,
+): string[] {
+	const dir = artifactDir(handle, `cycle-${cycle}`);
+	fs.writeFileSync(
+		path.join(dir, "review-result.json"),
+		`${JSON.stringify({ cycle, ...outcome }, null, "\t")}\n`,
+		{ mode: 0o600 },
+	);
+	return [`cycle-${cycle}/review-result.json`];
 }
 
 async function executeEscalation(

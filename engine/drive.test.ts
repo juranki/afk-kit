@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { slugFor } from "../extensions/coordinator/slug.ts";
 import { driveRun } from "./drive.ts";
-import type { CyclePort } from "./ports.ts";
+import type { CyclePort, ReviewPort } from "./ports.ts";
 import {
 	RUN_EVENT_NAMES,
 	type RunEvent,
@@ -163,6 +163,7 @@ describe("driveRun: the approved path", () => {
 	let worktree: string;
 	let briefBefore: Buffer;
 	const launched: number[] = [];
+	const reviewed: number[] = [];
 	const io: Io = { out: [], err: [] };
 	let exit: 0 | 1 | 2 | 3;
 
@@ -192,13 +193,24 @@ describe("driveRun: the approved path", () => {
 			// From here on the tracker presents the draft PR for the handoff.
 			world.setRules([...handoffRules(), ...baseRules(ISSUE, TITLE)]);
 			return {
-				status: "approved",
+				status: "verified",
 				cycle,
 				verifyResults: [{ command: "bun test", ok: true }],
+			};
+		};
+
+		const runReviews: ReviewPort = async (cycle) => {
+			reviewed.push(cycle);
+			return {
+				status: "approved",
+				cycle,
 				approvals: [
 					{
 						review: "standards",
-						verdict: { verdict: "approve", standardsConsulted: ["AGENTS.md"] },
+						verdict: {
+							verdict: "approve",
+							standardsConsulted: [{ path: "AGENTS.md", hash: "a".repeat(64) }],
+						},
 					},
 					{ review: "spec", verdict: { verdict: "approve" } },
 				],
@@ -209,6 +221,7 @@ describe("driveRun: the approved path", () => {
 			handle,
 			seams: world.seams,
 			runCycle,
+			runReviews,
 			io: { stdout: (t) => io.out.push(t), stderr: (t) => io.err.push(t) },
 		});
 	});
@@ -223,8 +236,9 @@ describe("driveRun: the approved path", () => {
 		expect(summary?.stage).toBe("handoff");
 	});
 
-	test("exactly one fresh cycle was launched", () => {
+	test("exactly one fresh cycle was launched and gated", () => {
 		expect(launched).toEqual([1]);
+		expect(reviewed).toEqual([1]);
 	});
 
 	test("every transition stage was persisted in order", () => {
@@ -236,6 +250,7 @@ describe("driveRun: the approved path", () => {
 			"bootstrap",
 			"cycle",
 			"publish",
+			"review",
 			"handoff",
 		]);
 		const cycles = eventsOf(handle)
@@ -257,6 +272,7 @@ describe("driveRun: the approved path", () => {
 			"bootstrap",
 			"cycle",
 			"candidate-push",
+			"review",
 			"handoff",
 		]);
 		expect(completions.map((e) => e.payload.operation)).toEqual(operations);
@@ -267,7 +283,11 @@ describe("driveRun: the approved path", () => {
 	});
 
 	test("the approval evidence is persisted as a Run artifact", () => {
-		const resultPath = path.join(handle.artifactsDir, "cycle-1", "result.json");
+		const resultPath = path.join(
+			handle.artifactsDir,
+			"cycle-1",
+			"review-result.json",
+		);
 		const result = JSON.parse(fs.readFileSync(resultPath, "utf8")) as {
 			status: string;
 			approvals: { review: string }[];
@@ -277,12 +297,12 @@ describe("driveRun: the approved path", () => {
 			"standards",
 			"spec",
 		]);
-		const cycleCompleted = eventsOf(handle).find(
+		const reviewCompleted = eventsOf(handle).find(
 			(e) =>
 				e.name === RUN_EVENT_NAMES.sideEffectCompleted &&
-				e.payload.operation === "cycle",
+				e.payload.operation === "review",
 		);
-		expect(cycleCompleted?.artifacts).toContain("cycle-1/result.json");
+		expect(reviewCompleted?.artifacts).toContain("cycle-1/review-result.json");
 	});
 
 	test("the immutable brief is never rewritten", () => {
@@ -346,15 +366,25 @@ interface Scenario {
 	out: string[];
 	err: string[];
 	launched: number[];
+	reviewed: number[];
+}
+
+/** The review port no scenario expects unless it says otherwise. */
+function neverReviews(): ReviewPort {
+	return async () => {
+		throw new Error("the review port must never launch in this scenario");
+	};
 }
 
 async function scenario(
 	rules: GhRule[],
 	runCycle: CyclePort,
+	runReviews: ReviewPort = neverReviews(),
 ): Promise<Scenario> {
 	const world = await makeWorld(ISSUE, TITLE, rules);
 	const handle = startRun(world);
 	const launched: number[] = [];
+	const reviewed: number[] = [];
 	const out: string[] = [];
 	const err: string[] = [];
 	const exit = await driveRun({
@@ -363,6 +393,10 @@ async function scenario(
 		runCycle: async (cycle) => {
 			launched.push(cycle);
 			return runCycle(cycle);
+		},
+		runReviews: async (cycle) => {
+			reviewed.push(cycle);
+			return runReviews(cycle);
 		},
 		io: { stdout: (t) => out.push(t), stderr: (t) => err.push(t) },
 	});
@@ -374,6 +408,7 @@ async function scenario(
 		out,
 		err,
 		launched,
+		reviewed,
 	};
 }
 
@@ -527,6 +562,176 @@ describe("driveRun: three failed cycles exhaust the cap", () => {
 	});
 });
 
+describe("driveRun: the Review gate routes findings into the next cycle", () => {
+	let world: Awaited<ReturnType<typeof makeWorld>>;
+	let handle: RunHandle;
+	const launched: number[] = [];
+	const reviewed: number[] = [];
+	let exit: 0 | 1 | 2 | 3;
+
+	beforeAll(async () => {
+		world = await makeWorld(ISSUE, TITLE, [
+			...bootstrapRules(),
+			...escalationRules(),
+		]);
+		handle = startRun(world);
+		const wt = worktreeFor(world);
+		const runCycle: CyclePort = async (cycle) => {
+			launched.push(cycle);
+			// The scripted Implementer leaves one candidate commit behind.
+			fs.writeFileSync(path.join(wt, "candidate.txt"), `cycle ${cycle}\n`);
+			const add = await world.git(["add", "-A"], wt);
+			if (add.exitCode !== 0) throw new Error(add.stderr);
+			const commit = await world.git(
+				["commit", "-m", `candidate for cycle ${cycle}`],
+				wt,
+			);
+			if (commit.exitCode !== 0) throw new Error(commit.stderr);
+			// From here on the tracker presents the draft PR for the pushes.
+			world.setRules([...handoffRules(), ...baseRules(ISSUE, TITLE)]);
+			return {
+				status: "verified",
+				cycle,
+				verifyResults: [{ command: "bun test", ok: true }],
+			};
+		};
+		const runReviews: ReviewPort = async (cycle) => {
+			reviewed.push(cycle);
+			return cycle === 1
+				? {
+						status: "changes-requested",
+						cycle,
+						reason: "standards review requests changes: no tests for the gate",
+					}
+				: {
+						status: "approved",
+						cycle,
+						approvals: [
+							{ review: "standards", verdict: { verdict: "approve" } },
+							{ review: "spec", verdict: { verdict: "approve" } },
+						],
+					};
+		};
+		exit = await driveRun({
+			handle,
+			seams: world.seams,
+			runCycle,
+			runReviews,
+			io: { stdout: () => {}, stderr: () => {} },
+		});
+	});
+
+	afterAll(() => cleanupWorld(world));
+
+	test("both cycles ran and both were gated", () => {
+		expect(exit).toBe(0);
+		expect(launched).toEqual([1, 2]);
+		expect(reviewed).toEqual([1, 2]);
+	});
+
+	test("cycle 1's requested changes are retained as evidence", () => {
+		const result = JSON.parse(
+			fs.readFileSync(
+				path.join(handle.artifactsDir, "cycle-1", "review-result.json"),
+				"utf8",
+			),
+		) as { status: string; reason: string };
+		expect(result.status).toBe("changes-requested");
+		expect(result.reason).toContain("no tests for the gate");
+	});
+
+	test("cycle 2's dual approval handed the Run over", () => {
+		const summary = summaryOf(handle);
+		expect(summary?.outcome).toBe("handed-over-to-maintainer");
+		expect(summary?.cycle).toBe(2);
+		const stages = eventsOf(handle)
+			.filter((e) => e.name === RUN_EVENT_NAMES.stageEntered)
+			.map((e) => e.payload.stage);
+		expect(stages).toEqual([
+			"claim",
+			"bootstrap",
+			"cycle",
+			"publish",
+			"review",
+			"cycle",
+			"publish",
+			"review",
+			"handoff",
+		]);
+	});
+});
+
+describe("driveRun: an escalate verdict from the Review gate ends the Run", () => {
+	let world: Awaited<ReturnType<typeof makeWorld>>;
+	let handle: RunHandle;
+	let exit: 0 | 1 | 2 | 3;
+
+	beforeAll(async () => {
+		world = await makeWorld(ISSUE, TITLE, [
+			...bootstrapRules(),
+			...escalationRules(),
+		]);
+		handle = startRun(world);
+		const wt = worktreeFor(world);
+		const runCycle: CyclePort = async (cycle) => {
+			fs.writeFileSync(path.join(wt, "candidate.txt"), `cycle ${cycle}\n`);
+			await world.git(["add", "-A"], wt);
+			await world.git(["commit", "-m", `candidate for cycle ${cycle}`], wt);
+			// From here on the tracker presents the draft PR; the Escalation
+			// rules stay so the gate's escalation can still comment.
+			world.setRules([
+				...handoffRules(),
+				...escalationRules(),
+				...baseRules(ISSUE, TITLE),
+			]);
+			return {
+				status: "verified",
+				cycle,
+				verifyResults: [{ command: "bun test", ok: true }],
+			};
+		};
+		exit = await driveRun({
+			handle,
+			seams: world.seams,
+			runCycle,
+			runReviews: async (cycle) => ({
+				status: "escalate",
+				cycle,
+				reason: "spec review escalated: the brief contradicts the ADR",
+			}),
+			io: { stdout: () => {}, stderr: () => {} },
+		});
+	});
+
+	afterAll(() => cleanupWorld(world));
+
+	test("one gated cycle, then escalation with exit 2 — no further cycles", () => {
+		expect(exit).toBe(2);
+		const outcome = outcomeEvent(handle);
+		expect(outcome?.payload.outcome).toBe("escalated");
+		expect(outcome?.payload.stage).toBe("review");
+		expect(outcome?.payload.cycle).toBe(1);
+		expect(outcome?.payload.reason).toContain("contradicts the ADR");
+	});
+
+	test("the escalate verdict is retained as evidence", () => {
+		const result = JSON.parse(
+			fs.readFileSync(
+				path.join(handle.artifactsDir, "cycle-1", "review-result.json"),
+				"utf8",
+			),
+		) as { status: string };
+		expect(result.status).toBe("escalate");
+	});
+
+	test("the Escalation comment names the review stage and cycle", () => {
+		const comment = world
+			.argvLog()
+			.find((args) => args.includes("issue comment"));
+		expect(comment).toContain("stopped at review, cycle 1");
+	});
+});
+
 describe("driveRun: an escalate verdict ends the Run immediately", () => {
 	let s: Scenario;
 	beforeAll(async () => {
@@ -615,6 +820,7 @@ describe("driveRun: a live lock refuses the drive", () => {
 			runCycle: async () => {
 				throw new Error("never launched");
 			},
+			runReviews: neverReviews(),
 			io: { stdout: (t) => out.push(t), stderr: (t) => err.push(t) },
 		});
 		expect(exit).toBe(3);
