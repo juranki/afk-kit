@@ -90,6 +90,11 @@ function fail(name: string, detail: string): CheckResult {
 	return { name, pass: false, detail };
 }
 
+/** The message of an unknown thrown value. */
+function messageOf(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * The snapshot used when the ticket itself could not be read: the immutable
  * brief slot still pins that fact, and readiness never runs on it.
@@ -156,12 +161,7 @@ async function gatherStartFacts(options: {
 			checks.push(pass("github-identity", `authenticated as ${user.login}`));
 		else checks.push(fail("github-identity", "gh api user returned no login"));
 	} catch (error) {
-		checks.push(
-			fail(
-				"github-identity",
-				error instanceof Error ? error.message : String(error),
-			),
-		);
+		checks.push(fail("github-identity", messageOf(error)));
 	}
 
 	// The ticket's brief substrate — shared by preflight and readiness.
@@ -171,12 +171,7 @@ async function gatherStartFacts(options: {
 			pass("ticket-readable", "brief, labels, and blocked-by edges fetched"),
 		);
 	} catch (error) {
-		checks.push(
-			fail(
-				"ticket-readable",
-				error instanceof Error ? error.message : String(error),
-			),
-		);
+		checks.push(fail("ticket-readable", messageOf(error)));
 	}
 
 	// Required triage labels (the readiness check's rule, run as a gate).
@@ -198,12 +193,7 @@ async function gatherStartFacts(options: {
 			pass("origin-main", `resolved origin/main at ${facts.baseSha}`),
 		);
 	} catch (error) {
-		checks.push(
-			fail(
-				"origin-main",
-				error instanceof Error ? error.message : String(error),
-			),
-		);
+		checks.push(fail("origin-main", messageOf(error)));
 	}
 
 	// Run state storage: the repository's state subtree must be creatable
@@ -221,17 +211,33 @@ async function gatherStartFacts(options: {
 		checks.push(
 			fail(
 				"state-storage",
-				`cannot write run state under ${repositoryRoot}: ${error instanceof Error ? error.message : String(error)}`,
+				`cannot write run state under ${repositoryRoot}: ${messageOf(error)}`,
 			),
 		);
 	}
 
 	// Uncleared prior Runs: v0 never reuses or auto-cleans — an unfinished
 	// Run (or an unreadable one) needs a maintainer's decision first.
+	const runsDir = issueRunsDir(repositoryRoot, ticket);
+	let priorDirs: fs.Dirent[] | null;
 	try {
-		const runsDir = issueRunsDir(repositoryRoot, ticket);
+		priorDirs = fs.readdirSync(runsDir, { withFileTypes: true });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			checks.push(pass("prior-runs", "no prior Runs"));
+		} else {
+			checks.push(
+				fail(
+					"prior-runs",
+					`cannot read prior Runs under ${runsDir}: ${messageOf(error)}`,
+				),
+			);
+		}
+		priorDirs = null;
+	}
+	if (priorDirs !== null) {
 		const uncleared: string[] = [];
-		for (const entry of fs.readdirSync(runsDir, { withFileTypes: true })) {
+		for (const entry of priorDirs) {
 			if (!entry.isDirectory()) continue;
 			try {
 				const summary = foldRunEvents(
@@ -254,8 +260,6 @@ async function gatherStartFacts(options: {
 		} else {
 			checks.push(pass("prior-runs", "no uncleared prior Run"));
 		}
-	} catch {
-		checks.push(pass("prior-runs", "no prior Runs"));
 	}
 
 	// Pinned configuration: models, agent definitions, SDK, executables.
@@ -272,12 +276,7 @@ async function gatherStartFacts(options: {
 			checks.push(fail("engine-config", config.problems.join("; ")));
 		}
 	} catch (error) {
-		checks.push(
-			fail(
-				"engine-config",
-				error instanceof Error ? error.message : String(error),
-			),
-		);
+		checks.push(fail("engine-config", messageOf(error)));
 	}
 
 	// Confinement capability: the sandbox runtime must initialize.
@@ -291,12 +290,7 @@ async function gatherStartFacts(options: {
 				: fail("confinement", probe.detail),
 		);
 	} catch (error) {
-		checks.push(
-			fail(
-				"confinement",
-				error instanceof Error ? error.message : String(error),
-			),
-		);
+		checks.push(fail("confinement", messageOf(error)));
 	}
 
 	// Dirty primary checkout: diagnostic only, never a gate.
@@ -370,7 +364,7 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 	try {
 		repository = await resolveRepository(cwd);
 	} catch (error) {
-		io.stderr(`afk implement: ${(error as Error).message}\n`);
+		io.stderr(`afk implement: ${messageOf(error)}\n`);
 		return 3;
 	}
 
@@ -397,7 +391,7 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 		});
 	} catch (error) {
 		io.stderr(
-			`afk implement: cannot persist Run evidence: ${error instanceof Error ? error.message : String(error)}\n`,
+			`afk implement: cannot persist Run evidence: ${messageOf(error)}\n`,
 		);
 		return 3;
 	}
@@ -463,7 +457,7 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 		}
 	} catch (error) {
 		io.stderr(
-			`afk implement: cannot persist trustworthy Run evidence: ${error instanceof Error ? error.message : String(error)}\n  ${handle.dir}\n`,
+			`afk implement: cannot persist trustworthy Run evidence: ${messageOf(error)}\n  ${handle.dir}\n`,
 		);
 		return 3;
 	}

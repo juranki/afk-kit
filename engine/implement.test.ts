@@ -313,6 +313,42 @@ describe("runImplement (L2)", () => {
 		cleanupWorld(f.world);
 	});
 
+	test("an unreadable ticket refuses durably on a placeholder snapshot", async () => {
+		const f = await fixture([
+			{
+				args: [
+					"issue",
+					"view",
+					String(ISSUE),
+					"--json",
+					"body,labels,blockedBy",
+				],
+				status: 4,
+			},
+		]);
+		const exit = await f.run();
+
+		expect(exit).toBe(1);
+		const dir = onlyRun(f.xdg);
+		// The immutable slot pins the fact that no brief was available.
+		expect(fs.readFileSync(path.join(dir, "brief.md"), "utf8")).toContain(
+			"could not be read",
+		);
+		const { events } = readRunEvents(path.join(dir, "events.jsonl"));
+		const outcome = events.find((e) => e.name === RUN_EVENT_NAMES.outcome);
+		expect(String(outcome?.payload.reason)).toContain("ticket-readable");
+		// Readiness never ran without a brief.
+		expect(
+			events.some(
+				(e) =>
+					e.name === RUN_EVENT_NAMES.stageEntered &&
+					e.payload.stage === "readiness",
+			),
+		).toBe(false);
+
+		cleanupWorld(f.world);
+	});
+
 	test("a dirty primary checkout is diagnostic, not blocking", async () => {
 		const f = await fixture([readinessRule(PASSING_BODY)]);
 		fs.writeFileSync(path.join(f.world.checkout, "uncommitted.txt"), "wip\n");

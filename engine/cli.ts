@@ -21,7 +21,7 @@ import {
 const USAGE = `usage: afk <command> [args]
 
 commands:
-  implement <issue-number> start the durable Engine Run for one Ticket
+  implement <issue-number>  start the durable Engine Run for one Ticket
                           (a single bare positive integer)
   status [issue-number]   show Runs for this repository, or one Ticket
                           (a single bare positive integer)
