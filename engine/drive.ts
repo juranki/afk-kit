@@ -34,7 +34,7 @@ import {
 	handOffPr,
 	pushCandidate,
 } from "./pr-ops.ts";
-import { RUN_EVENT_NAMES } from "./runs/events.ts";
+import { RUN_EVENT_NAMES, readRunEvents } from "./runs/events.ts";
 import {
 	acquireRunLock,
 	artifactDir,
@@ -61,6 +61,80 @@ export interface DriveOptions {
 	/** The parallel Standards/Spec Review port over the pushed diff (#63). */
 	runReviews: ReviewPort;
 	io?: DriveIo;
+	/**
+	 * The Run's interruption seam (ticket #65). Defaults to a fresh one;
+	 * ports register their in-flight sessions on it so an interruption
+	 * aborts them, and the driver races their settle against the settle cap.
+	 */
+	interruption?: Interruption;
+	/**
+	 * Install the OS signal handlers that interrupt the Run (SIGINT,
+	 * SIGTERM). Defaults to the real process; tests capture the handler.
+	 * Returns the uninstaller; the driver calls it when the Run finalizes.
+	 */
+	installSignals?: (handler: (signal: string) => void) => () => void;
+	/**
+	 * The Run's wall-clock deadline in milliseconds, measured from the Run
+	 * started event (ticket #65: two hours). `null` disables — tests only;
+	 * the durable spec's deadline is the default.
+	 */
+	deadlineMs?: number | null;
+	/** Overrides the settle cap (durable spec: 30 seconds) — tests only. */
+	settleCapMs?: number;
+}
+
+/** The Run's wall-clock deadline (durable spec #46: two hours). */
+export const RUN_DEADLINE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * How long an interrupted operation may keep settling and flushing before
+ * the Run finalizes (durable spec #46: 30 seconds; the agent's evidence is
+ * already on disk live — the cap bounds only the wait).
+ */
+export const INTERRUPT_SETTLE_CAP_MS = 30_000;
+
+/**
+ * The Run interruption seam (ticket #65): human cancellation, `SIGINT`,
+ * `SIGTERM`, and the two-hour Run deadline all arrive through `request`.
+ * The first reason wins; a second signal changes nothing. Ports register
+ * with `onRequest` to abort their in-flight agent sessions; the driver
+ * waits for the aborted operation to settle, up to the settle cap, then
+ * escalates the Run — an interrupted Run never continues and never resumes.
+ */
+export interface Interruption {
+	request(reason: string): void;
+	/** Register an abort listener; returns its unregister function. */
+	onRequest(listener: (reason: string) => void): () => void;
+	/** The pending interruption reason, or null while uninterrupted. */
+	reason(): string | null;
+}
+
+export function createInterruption(): Interruption {
+	let reason: string | null = null;
+	const listeners = new Set<(reason: string) => void>();
+	return {
+		request(next) {
+			if (reason !== null) return;
+			reason = next;
+			for (const listener of listeners) listener(next);
+		},
+		onRequest(listener) {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+		reason: () => reason,
+	};
+}
+
+/** The default signal installation: the real process's SIGINT and SIGTERM. */
+function installProcessSignals(handler: (signal: string) => void): () => void {
+	const h = (signal: NodeJS.Signals) => handler(signal);
+	process.on("SIGINT", h);
+	process.on("SIGTERM", h);
+	return () => {
+		process.off("SIGINT", h);
+		process.off("SIGTERM", h);
+	};
 }
 
 /**
@@ -236,12 +310,67 @@ function stageOf(state: MachineState): string | null {
 	}
 }
 
+/** The message of an unknown thrown value. */
+function messageOf(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Run-scoped facts learned by a side effect that settled inside the
+ * interrupt's settle window; the interrupt Escalation preserves them so
+ * the status comment keeps naming the PR, branch, and worktree.
+ */
+function factsFromOutcome(
+	effect: MachineEffect,
+	outcome: OpOutcome,
+): RunFacts | undefined {
+	switch (effect.type) {
+		case "claim":
+			return outcome.status === "claimed"
+				? {
+						branch: outcome.branch,
+						worktree: outcome.worktree,
+					}
+				: undefined;
+		case "bootstrap":
+			return outcome.status === "created" || outcome.status === "exists"
+				? { pr: outcome.pr }
+				: undefined;
+		default:
+			return undefined;
+	}
+}
+
+/**
+ * Keep the interruption itself as a cycle or Review evidence artifact: the
+ * operation was cut off and its ordinary result never existed.
+ */
+function persistInterruption(
+	handle: RunHandle,
+	kind: "cycle" | "review",
+	cycle: number,
+): string[] {
+	const dir = artifactDir(handle, `cycle-${cycle}`);
+	const file = path.join(
+		dir,
+		kind === "cycle" ? "result.json" : "review-result.json",
+	);
+	fs.writeFileSync(
+		file,
+		`${JSON.stringify({ cycle, status: "interrupted" }, null, "\t")}\n`,
+		{ mode: 0o600 },
+	);
+	return [`cycle-${cycle}/${path.basename(file)}`];
+}
+
 export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 	const { handle, seams, runCycle, runReviews } = options;
 	const io: DriveIo = options.io ?? {
 		stdout: (text) => process.stdout.write(text),
 		stderr: (text) => process.stderr.write(text),
 	};
+	const interruption = options.interruption ?? createInterruption();
+	const settleCapMs = options.settleCapMs ?? INTERRUPT_SETTLE_CAP_MS;
 
 	let lock: RunLock;
 	try {
@@ -254,11 +383,52 @@ export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 		throw error;
 	}
 
+	// The two-hour Run deadline (ticket #65): measured from the Run started
+	// event, not the drive's own start. Firing interrupts the Run exactly
+	// like a signal would.
+	const deadlineMs =
+		options.deadlineMs === undefined ? RUN_DEADLINE_MS : options.deadlineMs;
+	let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+	if (deadlineMs !== null) {
+		const startedMs = runStartedAtMs(handle) ?? Date.now();
+		const remaining = startedMs + deadlineMs - Date.now();
+		deadlineTimer = setTimeout(
+			() => {
+				interruption.request("the Run exceeded its two-hour deadline");
+			},
+			Math.max(0, remaining),
+		);
+		deadlineTimer.unref?.();
+	}
+	const uninstallSignals =
+		options.installSignals === undefined
+			? installProcessSignals((signal) =>
+					interruption.request(`interrupted by ${signal}`),
+				)
+			: options.installSignals((signal) =>
+					interruption.request(`interrupted by ${signal}`),
+				);
+
 	try {
-		return await driveLocked(handle, seams, runCycle, runReviews, io);
+		return await driveLocked(handle, seams, runCycle, runReviews, io, {
+			interruption,
+			settleCapMs,
+		});
 	} finally {
+		clearTimeout(deadlineTimer);
+		uninstallSignals();
 		releaseRunLock(lock, handle);
 	}
+}
+
+/** The Run started event's timestamp in ms, when the stream is readable. */
+function runStartedAtMs(handle: RunHandle): number | null {
+	const started = readRunEvents(handle.eventsPath).events.find(
+		(event) =>
+			event.name === RUN_EVENT_NAMES.started &&
+			Number.isFinite(Date.parse(event.ts)),
+	);
+	return started === undefined ? null : Date.parse(started.ts);
 }
 
 async function driveLocked(
@@ -267,7 +437,21 @@ async function driveLocked(
 	runCycle: CyclePort,
 	runReviews: ReviewPort,
 	io: DriveIo,
+	interrupt: {
+		interruption: Interruption;
+		settleCapMs: number;
+	},
 ): Promise<DriveExit> {
+	const { interruption, settleCapMs } = interrupt;
+
+	/**
+	 * Record every event through the journal; a failed append breaks the
+	 * evidence trail, so the Run escalates immediately (ticket #65) instead
+	 * of executing side effects it can no longer journal. Failures during
+	 * the final escalation itself are swallowed — the tracker comment is
+	 * then the durable record.
+	 */
+	let journalFailure: string | null = null;
 	const emit = (
 		name: string,
 		payload: Record<string, unknown>,
@@ -277,13 +461,18 @@ async function driveLocked(
 			artifacts?: string[];
 		} = {},
 	): void => {
-		recordEvent(handle, {
-			name,
-			payload,
-			cycle: rest.cycle ?? null,
-			op: rest.op ?? null,
-			artifacts: rest.artifacts ?? [],
-		});
+		if (journalFailure !== null && name !== RUN_EVENT_NAMES.outcome) return;
+		try {
+			recordEvent(handle, {
+				name,
+				payload,
+				cycle: rest.cycle ?? null,
+				op: rest.op ?? null,
+				artifacts: rest.artifacts ?? [],
+			});
+		} catch (error) {
+			journalFailure ??= `the Run journal failed: ${messageOf(error)}`;
+		}
 	};
 
 	/** Record every stage and cycle boundary the machine walks through. */
@@ -311,7 +500,28 @@ async function driveLocked(
 	let effect: MachineEffect | null = { type: "claim" };
 	emit(RUN_EVENT_NAMES.stageEntered, { stage: state.name });
 
+	/** Whether the pending interruption has been fed to the machine. */
+	let interruptHandled = false;
+
 	while (effect !== null) {
+		// A broken journal, an interrupt between operations, or a deadline
+		// that fired while the driver waited: all stop the Run right here.
+		// A terminal state is already resolved — its escalation effect runs.
+		const terminal =
+			state.name === "refused" ||
+			state.name === "escalated" ||
+			state.name === "handed-over";
+		const stopReason = terminal
+			? null
+			: (journalFailure ?? (interruptHandled ? null : interruption.reason()));
+		if (stopReason !== null) {
+			interruptHandled = true;
+			emit(RUN_EVENT_NAMES.notice, { message: stopReason });
+			const next = transition(state, { type: "interrupt", reason: stopReason });
+			state = next.state;
+			effect = next.effect; // the escalate effect
+		}
+
 		// The Escalation effect: the terminal decision is already made; the
 		// Escalator posts one status comment, applies needs-info, and
 		// preserves the assignee, PR, branch, worktree, and evidence. One-way,
@@ -351,18 +561,44 @@ async function driveLocked(
 			op: id,
 		});
 
-		let outcome: OpOutcome;
-		try {
-			outcome = await executeEffect(
-				handle,
-				effect,
-				seams,
-				runCycle,
-				runReviews,
-			);
-		} catch (error) {
-			outcome = outcomeFromThrow(effect, error, handle.ticket);
-		}
+		// Execute the side effect, but an interruption during it stops the
+		// wait: the in-flight work (an agent session) is aborted through the
+		// interruption listeners and allowed up to the settle cap to flush
+		// its evidence (ticket #65) before the Run finalizes.
+		const execution = executeEffect(
+			handle,
+			effect,
+			seams,
+			runCycle,
+			runReviews,
+		).then(
+			(outcome): OpOutcome => outcome,
+			(error): OpOutcome =>
+				outcomeFromThrow(
+					effect as Exclude<MachineEffect, { type: "escalate" }>,
+					error,
+					handle.ticket,
+				),
+		);
+		let settleCapTimer: ReturnType<typeof setTimeout> | undefined;
+		const capFired = new Promise<false>((resolve) => {
+			const off = interruption.onRequest((reason) => {
+				off();
+				settleCapTimer = setTimeout(() => resolve(false), settleCapMs);
+				settleCapTimer.unref?.();
+				void reason;
+			});
+		});
+		const raced = await Promise.race([
+			execution.then((outcome): { settled: true; outcome: OpOutcome } => ({
+				settled: true,
+				outcome,
+			})),
+			capFired.then((): { settled: false } => ({ settled: false })),
+		]);
+		clearTimeout(settleCapTimer);
+		const interruptedNow = interruption.reason() !== null && !interruptHandled;
+		let settledOutcome: OpOutcome | null = raced.settled ? raced.outcome : null;
 
 		// Evidence persistence: a cycle's or Review's structured result is
 		// written verbatim before the machine decides. A persistence failure
@@ -373,9 +609,11 @@ async function driveLocked(
 		if (effect.type === "cycle" || effect.type === "review") {
 			try {
 				artifacts =
-					effect.type === "cycle"
-						? persistCycleResult(handle, effect.cycle, outcome)
-						: persistReviewResult(handle, effect.cycle, outcome);
+					settledOutcome === null
+						? persistInterruption(handle, effect.type, effect.cycle)
+						: effect.type === "cycle"
+							? persistCycleResult(handle, effect.cycle, settledOutcome)
+							: persistReviewResult(handle, effect.cycle, settledOutcome);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				evidenceRefusal = `cannot persist ${effect.type} evidence: ${message}`;
@@ -384,16 +622,20 @@ async function driveLocked(
 
 		const completion: Record<string, unknown> = {
 			operation: intentPayload(effect).operation,
-			status: outcome.status,
+			status: settledOutcome === null ? "interrupted" : settledOutcome.status,
 		};
 		if (evidenceRefusal !== null) {
 			completion.text = `EVIDENCE_REFUSAL: ${evidenceRefusal}`;
-		} else if (
-			"text" in outcome &&
-			typeof outcome.text === "string" &&
-			outcome.text !== ""
-		) {
-			completion.text = outcome.text;
+		} else if (settledOutcome !== null) {
+			if (
+				"text" in settledOutcome &&
+				typeof settledOutcome.text === "string" &&
+				settledOutcome.text !== ""
+			) {
+				completion.text = settledOutcome.text;
+			}
+		} else {
+			completion.text = `the operation did not settle within ${Math.round(settleCapMs / 1000)} seconds after the interruption`;
 		}
 		emit(RUN_EVENT_NAMES.sideEffectCompleted, completion, {
 			cycle: inCycle,
@@ -403,24 +645,27 @@ async function driveLocked(
 
 		// The evidence trail is broken: the machine decides the escalation
 		// through its ordinary path — the Run never continues without its
-		// evidence (ticket afk-kit #64, durable spec #46).
-		if (evidenceRefusal !== null) {
-			const failedCycle =
-				effect.type === "cycle" || effect.type === "review"
-					? effect.cycle
-					: null;
-			if (failedCycle !== null) {
-				outcome = {
-					status: "escalate",
-					cycle: failedCycle,
-					reason: evidenceRefusal,
-				};
-			}
+		// evidence (ticket afk-kit #64, durable spec #46). An interruption
+		// that fired in the same window wins; the refusal stays recorded.
+		if (
+			evidenceRefusal !== null &&
+			settledOutcome !== null &&
+			(effect.type === "cycle" || effect.type === "review")
+		) {
+			settledOutcome = {
+				status: "escalate",
+				cycle: effect.cycle,
+				reason: evidenceRefusal,
+			};
 		}
 
 		// Run-scoped facts become known: record them for the projection.
-		if (effect.type === "claim" && outcome.status === "claimed") {
-			const claimed = outcome as Extract<
+		if (
+			settledOutcome !== null &&
+			effect.type === "claim" &&
+			settledOutcome.status === "claimed"
+		) {
+			const claimed = settledOutcome as Extract<
 				ClaimTicketOutcome,
 				{ status: "claimed" }
 			>;
@@ -430,18 +675,55 @@ async function driveLocked(
 			});
 		}
 		if (
+			settledOutcome !== null &&
 			effect.type === "bootstrap" &&
-			(outcome.status === "created" || outcome.status === "exists")
+			(settledOutcome.status === "created" ||
+				settledOutcome.status === "exists")
 		) {
+			const pr = settledOutcome.pr;
 			emit(RUN_EVENT_NAMES.context, {
-				pr: outcome.pr.number,
+				pr: pr.number,
 			});
 		}
 
+		// Decide the machine event: an interruption wins over every settled
+		// outcome except a handoff that completed within the settle window —
+		// the Run never escalates a PR that is already with the Maintainer.
 		const previous = state;
-		const next = transition(state, eventFor(effect, outcome));
-		state = next.state;
-		effect = next.effect;
+		if (interruptedNow && settledOutcome?.status !== "handed-off") {
+			interruptHandled = true;
+			const reason = interruption.reason() ?? "interrupted";
+			emit(RUN_EVENT_NAMES.notice, {
+				message: reason,
+				...(raced.settled
+					? {}
+					: { settle: "cap fired before the operation settled" }),
+				op: id,
+			});
+			const next = transition(state, {
+				type: "interrupt",
+				reason,
+				...(settledOutcome === null
+					? {}
+					: { facts: factsFromOutcome(effect, settledOutcome) }),
+			});
+			state = next.state;
+			effect = next.effect;
+		} else {
+			if (settledOutcome === null) {
+				// Unreachable: the cap only fires once interrupted.
+				throw new Error("the settle cap fired without an interruption");
+			}
+			const next = transition(
+				state,
+				eventFor(
+					effect as Exclude<MachineEffect, { type: "escalate" }>,
+					settledOutcome,
+				),
+			);
+			state = next.state;
+			effect = next.effect;
+		}
 		enterStage(state, previous);
 	}
 

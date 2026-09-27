@@ -10,7 +10,13 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { slugFor } from "../extensions/coordinator/slug.ts";
-import { driveRun } from "./drive.ts";
+import {
+	createInterruption,
+	driveRun,
+	INTERRUPT_SETTLE_CAP_MS,
+	type Interruption,
+	RUN_DEADLINE_MS,
+} from "./drive.ts";
 import type { CyclePort, ReviewPort } from "./ports.ts";
 import {
 	RUN_EVENT_NAMES,
@@ -921,5 +927,413 @@ describe("driveRun: an evidence-persistence failure escalates immediately", () =
 			.filter((args) => args.includes("issue comment"));
 		expect(comments).toHaveLength(1);
 		expect(comments[0]).toContain("cannot persist cycle evidence");
+	});
+});
+
+/**
+ * How long the driver lets an interrupted operation settle before
+ * finalizing (durable spec #46; the agent flushes its evidence live, the
+ * cap only bounds the wait).
+ */
+test("the Run deadline policy and the settle cap are the durable spec's", () => {
+	expect(RUN_DEADLINE_MS).toBe(2 * 60 * 60 * 1000);
+	expect(INTERRUPT_SETTLE_CAP_MS).toBe(30_000);
+});
+
+describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () => {
+	function until(condition: () => boolean, what: string): Promise<void> {
+		return (async () => {
+			const budget = Date.now() + 5_000;
+			while (!condition()) {
+				if (Date.now() > budget) {
+					throw new Error(`timed out waiting for ${what}`);
+				}
+				await Bun.sleep(2);
+			}
+		})();
+	}
+
+	interface InterruptControls {
+		world: Awaited<ReturnType<typeof makeWorld>>;
+		handle: RunHandle;
+		/** Resolves once the world and handle exist — before the drive starts. */
+		ready: Promise<void>;
+		/** Resolves with the drive's exit once the Run has finalized. */
+		done: Promise<0 | 1 | 2 | 3>;
+		launched: number[];
+		reviewed: number[];
+		fire: (signal: string) => void;
+		interruption: Interruption;
+	}
+
+	/** Start a driven Run whose signals and interruption the test controls. */
+	function interrupted(options: {
+		rules: GhRule[];
+		runCycle: (
+			cycle: number,
+			interruption: Interruption,
+		) => Promise<CycleOutcome>;
+		runReviews?: (
+			cycle: number,
+			interruption: Interruption,
+		) => Promise<ReviewOutcome>;
+		deadlineMs?: number | null;
+		settleCapMs?: number;
+	}): InterruptControls {
+		let world: Awaited<ReturnType<typeof makeWorld>> | undefined;
+		let handle: RunHandle | undefined;
+		const launched: number[] = [];
+		const reviewed: number[] = [];
+		const interruption = createInterruption();
+		let fire: (signal: string) => void = () => {
+			throw new Error("the signal handler was never installed");
+		};
+		let readyResolve: (() => void) | undefined;
+		const ready = new Promise<void>((resolve) => {
+			readyResolve = resolve;
+		});
+		const done = (async (): Promise<0 | 1 | 2 | 3> => {
+			world = await makeWorld(ISSUE, TITLE, options.rules);
+			handle = startRun(world);
+			readyResolve?.();
+			return driveRun({
+				handle,
+				seams: world.seams,
+				runCycle: async (cycle) => {
+					launched.push(cycle);
+					return options.runCycle(cycle, interruption);
+				},
+				runReviews: async (cycle) => {
+					reviewed.push(cycle);
+					return (options.runReviews ?? neverReviews())(cycle, interruption);
+				},
+				interruption,
+				installSignals: (handler) => {
+					fire = (signal) => handler(signal);
+					return () => {};
+				},
+				...(options.deadlineMs === undefined
+					? { deadlineMs: null }
+					: { deadlineMs: options.deadlineMs }),
+				...(options.settleCapMs === undefined
+					? {}
+					: { settleCapMs: options.settleCapMs }),
+				io: { stdout: () => {}, stderr: () => {} },
+			});
+		})();
+		return {
+			get world() {
+				if (world === undefined) throw new Error("world not ready yet");
+				return world;
+			},
+			get handle() {
+				if (handle === undefined) throw new Error("handle not ready yet");
+				return handle;
+			},
+			ready,
+			done,
+			launched,
+			reviewed,
+			fire: (signal) => fire(signal),
+			interruption,
+		};
+	}
+
+	/** A cycle that hangs until the interruption aborts it, then settles. */
+	const hangUntilAborted = (
+		cycle: number,
+		interruption: Interruption,
+	): Promise<CycleOutcome> =>
+		new Promise((resolve) => {
+			const off = interruption.onRequest(() => {
+				off();
+				resolve({
+					status: "failed",
+					cycle,
+					reason: "the implementer session was aborted",
+				});
+			});
+		});
+
+	const VERIFIED_FAST: CycleOutcome = {
+		status: "verified",
+		cycle: 1,
+		verifyResults: [{ command: "bun test", ok: true }],
+	};
+
+	const APPROVED_FAST: ReviewOutcome = {
+		status: "approved",
+		cycle: 1,
+		approvals: [
+			{ review: "standards", verdict: { verdict: "approve" } },
+			{ review: "spec", verdict: { verdict: "approve" } },
+		],
+	};
+
+	test("SIGINT during a cycle escalates immediately once the aborted session settles", async () => {
+		const s = interrupted({
+			rules: [...bootstrapRules(), ...escalationRules()],
+			runCycle: hangUntilAborted,
+			settleCapMs: 5_000,
+		});
+		try {
+			await until(() => s.launched.length === 1, "cycle 1 to launch");
+			s.fire("SIGINT");
+			expect(await s.done).toBe(2);
+			const outcome = outcomeEvent(s.handle);
+			expect(outcome?.payload.outcome).toBe("escalated");
+			expect(outcome?.payload.reason).toContain("SIGINT");
+			expect(outcome?.payload.stage).toBe("cycle");
+			// The interruption stops the Run: no second cycle is launched.
+			expect(s.launched).toEqual([1]);
+			// Exactly one status comment names the interruption.
+			const comments = s.world
+				.argvLog()
+				.filter((args) => args.includes("issue comment"));
+			expect(comments).toHaveLength(1);
+			expect(comments[0]).toContain("interrupted by SIGINT");
+			// The settled outcome is recorded honestly — the cycle failed.
+			const completed = eventsOf(s.handle).find(
+				(e) =>
+					e.name === RUN_EVENT_NAMES.sideEffectCompleted &&
+					e.payload.operation === "cycle",
+			);
+			expect(completed?.payload.status).toBe("failed");
+			// The interruption itself is in the journal.
+			const notice = eventsOf(s.handle).find(
+				(e) => e.name === RUN_EVENT_NAMES.notice,
+			);
+			expect(JSON.stringify(notice?.payload)).toContain("SIGINT");
+		} finally {
+			await cleanupWorld(s.world);
+		}
+	});
+
+	test("an operation that never settles is cut off by the settle cap", async () => {
+		const s = interrupted({
+			rules: [...bootstrapRules(), ...escalationRules()],
+			runCycle: () => new Promise(() => {}), // ignores the abort, never settles
+			settleCapMs: 30,
+		});
+		try {
+			await until(() => s.launched.length === 1, "cycle 1 to launch");
+			s.fire("SIGTERM");
+			const started = Date.now();
+			expect(await s.done).toBe(2);
+			// The cap, not the wedged session, bounded the wait.
+			expect(Date.now() - started).toBeLessThan(5_000);
+			const completed = eventsOf(s.handle).find(
+				(e) =>
+					e.name === RUN_EVENT_NAMES.sideEffectCompleted &&
+					e.payload.operation === "cycle",
+			);
+			expect(completed?.payload.status).toBe("interrupted");
+			// The interruption is kept as cycle evidence.
+			const marker = JSON.parse(
+				fs.readFileSync(
+					path.join(s.handle.artifactsDir, "cycle-1", "result.json"),
+					"utf8",
+				),
+			) as { status: string };
+			expect(marker.status).toBe("interrupted");
+			const outcome = outcomeEvent(s.handle);
+			expect(outcome?.payload.reason).toContain("SIGTERM");
+		} finally {
+			await cleanupWorld(s.world);
+		}
+	});
+
+	test("the two-hour Run deadline escalates mid-cycle", async () => {
+		const s = interrupted({
+			rules: [...bootstrapRules(), ...escalationRules()],
+			runCycle: hangUntilAborted,
+			settleCapMs: 5_000,
+			deadlineMs: 800,
+		});
+		try {
+			await s.ready;
+			await until(() => s.launched.length === 1, "cycle 1 to launch");
+			expect(await s.done).toBe(2);
+			const outcome = outcomeEvent(s.handle);
+			expect(outcome?.payload.reason).toContain("deadline");
+			expect(s.launched).toEqual([1]);
+			expect(s.reviewed).toEqual([]);
+			const comments = s.world
+				.argvLog()
+				.filter((args) => args.includes("issue comment"));
+			expect(comments).toHaveLength(1);
+		} finally {
+			await cleanupWorld(s.world);
+		}
+	});
+
+	test("a review approval that settles after the interrupt loses to it", async () => {
+		const s = interrupted({
+			rules: [...bootstrapRules(), ...escalationRules()],
+			runCycle: async () => VERIFIED_FAST,
+			runReviews: (_cycle, interruption) =>
+				new Promise((resolve) => {
+					const off = interruption.onRequest(() => {
+						off();
+						resolve(APPROVED_FAST);
+					});
+				}),
+			settleCapMs: 5_000,
+		});
+		try {
+			await until(() => s.reviewed.length === 1, "the reviews to launch");
+			s.fire("SIGINT");
+			expect(await s.done).toBe(2);
+			// The approval is recorded, but the human cancelled: no handoff.
+			expect(s.world.argvLog().some((args) => args.includes("pr ready"))).toBe(
+				false,
+			);
+			expect(outcomeEvent(s.handle)?.payload.outcome).toBe("escalated");
+			expect(s.launched).toEqual([1]);
+			expect(s.reviewed).toEqual([1]);
+		} finally {
+			await cleanupWorld(s.world);
+		}
+	});
+
+	test("a handoff that completes during the settle window stands — no escalation chases a ready PR", async () => {
+		// `pr edit` is the handoff's slow step; the signal lands mid-handoff.
+		// This `pr list` rule shadows the bootstrap phase's empty one, so the
+		// handoff finds the draft PR it hands over.
+		const prList = {
+			args: [
+				"pr",
+				"list",
+				"--head",
+				BRANCH,
+				"--state",
+				"open",
+				"--json",
+				"number,title,url,isDraft",
+			],
+			json: [
+				{
+					number: 99,
+					title: `${TITLE} (#${ISSUE})`,
+					url: "https://example.com/repo/pull/99",
+					isDraft: true,
+				},
+			],
+		};
+		const s = interrupted({
+			rules: [
+				prList,
+				...bootstrapRules(),
+				{
+					args: ["issue", "view", String(ISSUE), "--json", "body,labels"],
+					json: {
+						body: BRIEF_BODY,
+						labels: [{ name: "ready-for-agent" }, { name: "in-progress" }],
+					},
+				},
+				{ args: ["pr", "edit", "99"], json: {}, delayMs: 300 },
+				{ args: ["pr", "ready", "99"], json: {} },
+				...escalationRules(),
+			],
+			runCycle: async (cycle) => {
+				// The scripted Implementer leaves a candidate commit behind, as
+				// a real cycle would — otherwise the candidate push refuses.
+				const worktree = path.join(s.world.worktreeRoot, "remote", BRANCH);
+				fs.writeFileSync(
+					path.join(worktree, "candidate.txt"),
+					`cycle ${cycle}\n`,
+				);
+				const add = await s.world.git(["add", "-A"], worktree);
+				if (add.exitCode !== 0) throw new Error(add.stderr);
+				const commit = await s.world.git(
+					["commit", "-m", `candidate for cycle ${cycle}`],
+					worktree,
+				);
+				if (commit.exitCode !== 0) throw new Error(commit.stderr);
+				return { ...VERIFIED_FAST, cycle };
+			},
+			runReviews: async () => APPROVED_FAST,
+			settleCapMs: 10_000,
+		});
+		try {
+			await s.ready;
+			await until(
+				() => s.world.argvLog().some((args) => args.startsWith("pr edit")),
+				"the handoff to reach pr edit",
+			);
+			s.fire("SIGINT");
+			expect(await s.done).toBe(0);
+			expect(outcomeEvent(s.handle)?.payload.outcome).toBe(
+				"handed-over-to-maintainer",
+			);
+			expect(
+				s.world.argvLog().some((args) => args.includes("issue comment")),
+			).toBe(false);
+		} finally {
+			await cleanupWorld(s.world);
+		}
+	}, 20_000);
+
+	test("state corruption escalates immediately instead of crashing the drive", async () => {
+		const s = interrupted({
+			rules: [...bootstrapRules(), ...escalationRules()],
+			runCycle: async (cycle) => {
+				if (cycle === 2) {
+					// Interior corruption: parseable JSON that is not an event.
+					fs.appendFileSync(s.handle.eventsPath, '{"broken": true}\n');
+					// The real port's first act is reading the Run's events.
+					readRunEvents(s.handle.eventsPath);
+				}
+				// Cycle 1 fails under the cap so the Run reaches Cycle 2.
+				return cycle === 1
+					? { status: "failed", cycle, reason: "cycle 1 failed" }
+					: { ...VERIFIED_FAST, cycle };
+			},
+		});
+		try {
+			expect(await s.done).toBe(2);
+			// The corrupted journal cannot record the outcome event — the
+			// status comment is the durable record, and it names the reason.
+			const comment = s.world
+				.argvLog()
+				.find((args) => args.includes("issue comment"));
+			expect(comment).toBeDefined();
+			expect(comment).toContain("events.jsonl line 16");
+			// Cycle 1 failed under the cap; Cycle 2 threw on the corruption.
+			expect(s.launched).toEqual([1, 2]);
+		} finally {
+			await cleanupWorld(s.world);
+		}
+	});
+
+	test("a broken journal escalates instead of executing unjournaled side effects", async () => {
+		const s = interrupted({
+			rules: [...bootstrapRules(), ...escalationRules()],
+			runCycle: async (cycle) => {
+				if (cycle === 2) {
+					// Interior corruption: the driver's next append fails, so
+					// Cycle 3's intent can never be journaled.
+					fs.appendFileSync(s.handle.eventsPath, '{"broken": true}\n');
+				}
+				// Cycle 1 fails under the cap; Cycle 2's outcome is honest.
+				return cycle === 1
+					? { status: "failed", cycle, reason: "cycle 1 failed" }
+					: { status: "failed", cycle, reason: "cycle 2 failed" };
+			},
+		});
+		try {
+			expect(await s.done).toBe(2);
+			// The broken journal cannot record the outcome event — the status
+			// comment is the durable record, and it names the journal failure.
+			const comment = s.world
+				.argvLog()
+				.find((args) => args.includes("issue comment"));
+			expect(comment).toContain("journal failed");
+			// Cycles 1 and 2 launched (their intents were journaled), but the
+			// broken journal stops the Run before Cycle 3.
+			expect(s.launched).toEqual([1, 2]);
+		} finally {
+			await cleanupWorld(s.world);
+		}
 	});
 });

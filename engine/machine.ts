@@ -107,14 +107,29 @@ export type MachineState =
 	  }
 	| { name: "handed-over"; facts: RunFacts; cycle: number };
 
-/** The outcomes the driver feeds back after executing an effect. */
+/**
+ * The outcomes the driver feeds back after executing an effect.
+ *
+ * The `interrupt` event is how human cancellation, `SIGINT`/`SIGTERM`, and
+ * the two-hour Run deadline reach the machine (ticket #65): it wins over
+ * any settled side-effect outcome — an interrupted Run escalates instead of
+ * continuing — and carries facts learned before the interruption so the
+ * Escalation preserves them.
+ */
 export type MachineEvent =
 	| { type: "claim"; outcome: ClaimTicketOutcome }
 	| { type: "bootstrap"; outcome: BootstrapOutcome }
 	| { type: "cycle"; outcome: CycleOutcome }
 	| { type: "candidate-push"; outcome: CandidatePushOutcome }
 	| { type: "review"; outcome: ReviewOutcome }
-	| { type: "handoff"; outcome: HandOffOutcome };
+	| { type: "handoff"; outcome: HandOffOutcome }
+	| {
+			type: "interrupt";
+			/** Why the Run must stop immediately and return to the Maintainer. */
+			reason: string;
+			/** Facts learned (e.g. a settled Claim) before the interrupt fired. */
+			facts?: RunFacts;
+	  };
 
 /**
  * The side-effect commands. Each is interpreted by the driver through one
@@ -135,6 +150,31 @@ export function startState(): MachineState {
 	return { name: "claim" };
 }
 
+/**
+ * The Run-scoped facts a non-terminal state already knows; an interrupt
+ * Escalation preserves them, exactly as each stage's own escalation does.
+ */
+function factsOf(state: MachineState): RunFacts {
+	switch (state.name) {
+		case "bootstrap":
+			return {
+				branch: state.claim.branch,
+				worktree: state.claim.worktree,
+			};
+		case "cycle":
+		case "publish":
+		case "review":
+		case "handoff":
+			return {
+				branch: state.claim.branch,
+				worktree: state.claim.worktree,
+				pr: state.pr,
+			};
+		default:
+			return {};
+	}
+}
+
 /** One transition: the next state and the single side effect to execute. */
 export function transition(
 	state: MachineState,
@@ -147,6 +187,30 @@ export function transition(
 		state.name === "handed-over"
 	) {
 		return { state, effect: null };
+	}
+
+	// An interrupted Run escalates immediately, from whatever stage it sat
+	// in (ticket #65): the interruption wins over any settled outcome, and
+	// the facts the Run already knew (plus any learned before the interrupt
+	// fired) are preserved for the Escalation.
+	if (event.type === "interrupt") {
+		const inCycle =
+			state.name === "cycle" ||
+			state.name === "publish" ||
+			state.name === "review" ||
+			state.name === "handoff"
+				? state.cycle
+				: null;
+		return {
+			state: {
+				name: "escalated",
+				reason: event.reason,
+				stage: state.name,
+				cycle: inCycle,
+				facts: { ...factsOf(state), ...event.facts },
+			},
+			effect: { type: "escalate" },
+		};
 	}
 
 	switch (state.name) {

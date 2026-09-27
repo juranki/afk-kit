@@ -623,3 +623,80 @@ describe("Engine state machine: the cap is a code path", () => {
 		expect(MAX_CYCLES).toBe(3);
 	});
 });
+
+describe("Engine state machine: interruption (ticket #65)", () => {
+	const REASON = "interrupted by SIGINT";
+
+	function interrupt(): MachineEvent {
+		return { type: "interrupt", reason: REASON };
+	}
+
+	test("an interrupt in every non-terminal state escalates immediately", () => {
+		const nonTerminals: MachineState[] = [
+			startState(),
+			bootstrapped(),
+			cycling(),
+			cycling(2),
+			cycling(3),
+			publishing(),
+			reviewing(),
+			handingOff(),
+		];
+		for (const state of nonTerminals) {
+			const { state: next, effect } = transition(state, interrupt());
+			expect(next.name).toBe("escalated");
+			if (next.name !== "escalated") continue;
+			expect(next.reason).toBe(REASON);
+			expect(next.stage).toBe(state.name);
+			expect(effect).toEqual({ type: "escalate" });
+		}
+	});
+
+	test("the interrupt carries the stopped stage and cycle", () => {
+		const { state } = transition(cycling(2), interrupt());
+		expect(state).toMatchObject({
+			name: "escalated",
+			stage: "cycle",
+			cycle: 2,
+		});
+		const { state: fromReview } = transition(reviewing(), interrupt());
+		expect(fromReview).toMatchObject({
+			name: "escalated",
+			stage: "review",
+			cycle: 1,
+		});
+	});
+
+	test("the interrupt keeps the Run facts the escalation must preserve", () => {
+		const { state } = transition(bootstrapped(), interrupt());
+		expect(state).toMatchObject({
+			name: "escalated",
+			facts: { branch: CLAIMED.branch, worktree: CLAIMED.worktree },
+		});
+	});
+
+	test("facts learned before the interrupt ride into the escalation", () => {
+		// The claim settled during the settle window; its facts must reach
+		// the status comment even though the interrupt event wins.
+		const { state } = transition(startState(), {
+			type: "interrupt",
+			reason: REASON,
+			facts: { branch: CLAIMED.branch, worktree: CLAIMED.worktree },
+		});
+		expect(state).toMatchObject({
+			name: "escalated",
+			facts: { branch: CLAIMED.branch, worktree: CLAIMED.worktree },
+		});
+	});
+
+	test("terminals absorb an interrupt — a finished Run never re-escalates", () => {
+		for (const terminal of [
+			transition(startState(), claimEvent(CLAIM_REFUSED)).state,
+			transition(cycling(), interrupt()).state,
+		]) {
+			const { state, effect } = transition(terminal, interrupt());
+			expect(state).toBe(terminal);
+			expect(effect).toBeNull();
+		}
+	});
+});

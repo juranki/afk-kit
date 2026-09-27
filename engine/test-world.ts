@@ -20,19 +20,22 @@ export interface GhRule {
 	status?: number;
 	json?: unknown;
 	stdout?: string;
+	/** How long the stub stalls before answering — in-flight windows for interruption tests. */
+	delayMs?: number;
 }
 
 const GH_STUB = `#!/usr/bin/env bun
 import * as fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_STUB_LOG!, JSON.stringify(args) + "\\n");
-const rules: { args: string[]; status?: number; json?: unknown; stdout?: string }[] =
+const rules: { args: string[]; status?: number; json?: unknown; stdout?: string; delayMs?: number }[] =
 	JSON.parse(fs.readFileSync(process.env.GH_STUB_RULES!, "utf8"));
 const rule = rules.find((r) => r.args.every((a, i) => args[i] === a));
 if (!rule) {
 	process.stderr.write("gh-stub: unstubbed call: " + args.join(" ") + "\\n");
 	process.exit(3);
 }
+if (rule.delayMs) await Bun.sleep(rule.delayMs);
 if (rule.json !== undefined) console.log(JSON.stringify(rule.json));
 if (rule.stdout !== undefined) process.stdout.write(rule.stdout);
 process.exit(rule.status ?? 0);
