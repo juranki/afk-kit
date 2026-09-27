@@ -39,6 +39,7 @@ import {
 	acquireRunLock,
 	artifactDir,
 	type RunHandle,
+	type RunLock,
 	RunStoreError,
 	recordEvent,
 	releaseRunLock,
@@ -60,16 +61,22 @@ export interface DriveOptions {
 	io?: DriveIo;
 }
 
+/**
+ * Precondition: the caller has passed preflight and readiness on the Run's
+ * immutable brief snapshot — a Claim happens only after the readiness check
+ * passes (ontology invariant; today `runImplement`, the CLI in #62).
+ */
+
 /** The exit-code contract of the durable spec (CLI section). */
 export type DriveExit = 0 | 1 | 2 | 3;
 
 /**
- * A side-effect outcome, as the adapters return them. `claimed`/`refused`
- * without facts is the shape a thrown claim read collapses to.
+ * A side-effect outcome, exactly as the adapters return them. A thrown
+ * adapter collapses into the same shapes via `outcomeFromThrow`, so the
+ * machine sees one vocabulary.
  */
 type OpOutcome =
-	| { status: "claimed"; text: string }
-	| { status: "refused"; text: string }
+	| ClaimTicketOutcome
 	| BootstrapOutcome
 	| CycleOutcome
 	| CandidatePushOutcome
@@ -140,44 +147,50 @@ function intentPayload(effect: MachineEffect): Record<string, unknown> {
  * A thrown adapter is a side-effect refusal for the tracker/Git ops (their
  * contract returns refusals; a throw means an unhandled seam read failed)
  * and an immediate Escalation for the cycle port — infrastructure
- * uncertainty never continues silently (durable spec #46).
+ * uncertainty never continues silently (durable spec #46). The refusal
+ * shapes match the adapters' own, so the machine sees one vocabulary.
  */
 function outcomeFromThrow(
-	effect: MachineEffect,
+	effect: Exclude<MachineEffect, { type: "escalate" }>,
 	error: unknown,
-	cycle: number,
+	ticket: number,
 ): OpOutcome {
 	const message = error instanceof Error ? error.message : String(error);
 	switch (effect.type) {
 		case "claim":
 			return {
 				status: "refused",
+				issue: ticket,
 				text: `CLAIM_REFUSAL: reading the ticket failed: ${message}`,
 			};
 		case "bootstrap":
 			return {
 				status: "refused",
+				issue: ticket,
 				text: `PUBLISH_REFUSAL: bootstrap failed: ${message}`,
 			};
 		case "cycle":
-			return { status: "escalate", cycle, reason: message };
+			return { status: "escalate", cycle: effect.cycle, reason: message };
 		case "candidate-push":
 			return {
 				status: "refused",
+				issue: ticket,
 				text: `PUBLISH_REFUSAL: candidate push failed: ${message}`,
 			};
 		case "handoff":
 			return {
 				status: "refused",
+				issue: ticket,
 				text: `HANDOFF_REFUSAL: handoff failed: ${message}`,
 			};
-		case "escalate":
-			return { status: "refused", text: message };
 	}
 }
 
 /** Feed an executed outcome back into the machine as its event. */
-function eventFor(effect: MachineEffect, outcome: OpOutcome): MachineEvent {
+function eventFor(
+	effect: Exclude<MachineEffect, { type: "escalate" }>,
+	outcome: OpOutcome,
+): MachineEvent {
 	switch (effect.type) {
 		case "claim":
 			return { type: "claim", outcome: outcome as ClaimTicketOutcome };
@@ -192,9 +205,6 @@ function eventFor(effect: MachineEffect, outcome: OpOutcome): MachineEvent {
 			};
 		case "handoff":
 			return { type: "handoff", outcome: outcome as HandOffOutcome };
-		case "escalate":
-			// Never reached: the loop executes escalations before effects.
-			return { type: "claim", outcome: { status: "refused", text: "" } };
 	}
 }
 
@@ -327,14 +337,18 @@ async function driveLocked(
 		try {
 			outcome = await executeEffect(handle, effect, seams, runCycle);
 		} catch (error) {
-			outcome = outcomeFromThrow(effect, error, inCycle ?? 0);
+			outcome = outcomeFromThrow(effect, error, handle.ticket);
 		}
 
 		const completion: Record<string, unknown> = {
 			operation: intentPayload(effect).operation,
 			status: outcome.status,
 		};
-		if (typeof outcome.text === "string" && outcome.text !== "") {
+		if (
+			"text" in outcome &&
+			typeof outcome.text === "string" &&
+			outcome.text !== ""
+		) {
 			completion.text = outcome.text;
 		}
 		const artifacts =
@@ -399,7 +413,7 @@ async function driveLocked(
 
 async function executeEffect(
 	handle: RunHandle,
-	effect: MachineEffect,
+	effect: Exclude<MachineEffect, { type: "escalate" }>,
 	seams: EngineSeams,
 	runCycle: CyclePort,
 ): Promise<OpOutcome> {
@@ -414,9 +428,6 @@ async function executeEffect(
 			return pushCandidate(effect.input, seams);
 		case "handoff":
 			return handOffPr(effect.input, seams);
-		case "escalate":
-			// Handled by the loop before side effects execute.
-			return { status: "refused", text: "unreachable" };
 	}
 }
 
