@@ -39,3 +39,19 @@ bun test package.test.ts
 
 Expected: the package manifest registers neither the retired `subagent` extension nor
 its prompts, and `extensions/subagent/` does not exist.
+
+## 4. Confinement pin smoke
+
+Run whenever the exact `@anthropic-ai/sandbox-runtime` pin changes. On Linux this
+requires `bubblewrap`, `socat`, `ripgrep`, `curl`, unprivileged user namespaces, and
+outbound HTTPS:
+
+```bash
+cd /home/sprite/afk-kit
+bun run confinement:smoke
+```
+
+Expected: all six probes pass — write inside the task worktree, refuse write outside,
+refuse a sensitive read, reach an allowlisted domain, refuse a non-allowlisted domain,
+and preserve a normal nonzero exit code. This is a live host-capability and dependency
+upgrade gate, so it stays separate from the deterministic `bun run verify` sweep.

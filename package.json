@@ -11,7 +11,8 @@
 		"test": "bun test --pass-with-no-tests",
 		"lint": "biome check .",
 		"deadcode": "KNIP_DISABLE_RAW_TRANSFER=1 knip",
-		"verify": "bun test --pass-with-no-tests && biome check . && KNIP_DISABLE_RAW_TRANSFER=1 knip && bun scripts/drift-review.ts"
+		"verify": "bun test --pass-with-no-tests && biome check . && KNIP_DISABLE_RAW_TRANSFER=1 knip && bun scripts/drift-review.ts",
+		"confinement:smoke": "bun scripts/confinement-smoke.ts"
 	},
 	"pi": {
 		"extensions": [
@@ -31,5 +32,8 @@
 		"typebox": "1.3.7",
 		"@biomejs/biome": "2.5.14",
 		"knip": "6.37.0"
+	},
+	"dependencies": {
+		"@anthropic-ai/sandbox-runtime": "0.0.77"
 	}
 }
