@@ -35,7 +35,7 @@ The vocabulary and invariants of this workflow live in the
 | [`system-intent/`](system-intent/) | Model frame: the [Agent Delivery Workflow ontology](system-intent/ontologies/agent-delivery-workflow.md) (terms + invariants), fictional characters, and user stories that pressure-test the design |
 | [`docs/`](docs/) | 13 ADRs, playbooks (planning/coordinator sessions), conventions (issue lifecycle, branching, review/escalation, code-verify) |
 | [`skills/`](skills/) | The outgoing `coordinator` skill, pending reconciliation under the pivot map ([ADR 0013](docs/adr/0013-coordinator-skill-carries-judgment-agentic-drift-review.md)) |
-| [`extensions/`](extensions/) | Deterministic readiness, coordinator-operation, and merge-guard extensions; the vendored `subagent` extension was retired by [ticket #41](https://github.com/juranki/afk-kit/issues/41) |
+| [`extensions/`](extensions/) | Deterministic readiness and coordinator-operation extensions; the merge-guard extension was retired by [ticket #49](https://github.com/juranki/afk-kit/issues/49), the vendored `subagent` extension by [ticket #41](https://github.com/juranki/afk-kit/issues/41) |
 | [`prototype/`](prototype/), [`scripts/`](scripts/) | Throwaway prototypes and verification support |
 
 **Stack:** TypeScript on **Bun**, packaged as a pi-package (extensions and skills),

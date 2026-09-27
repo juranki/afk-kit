@@ -21,8 +21,8 @@ invents its own notion of "tested".
 
 | Layer | Covers | How |
 | --- | --- | --- |
-| **L1 Unit** | Deterministic decision logic — readiness parsing, branch naming, pull-request shaping, merge-guard evaluation, and package resources | `bun test` — offline, no git, no network |
-| **L2 Seam-integration** | Coordinator mechanics (claim + worktree + branch, push + PR, merge guard) against faked seams | `bun test` with real `git` against a local bare repo and a stubbed `gh` on `PATH` |
+| **L1 Unit** | Deterministic decision logic — readiness parsing, branch naming, pull-request shaping, and package resources | `bun test` — offline, no git, no network |
+| **L2 Seam-integration** | Coordinator mechanics (claim + worktree + branch, push + PR) against faked seams | `bun test` with real `git` against a local bare repo and a stubbed `gh` on `PATH` |
 | **L3 Live smoke** | Runtime integration that requires a real pi process | No current command; the retired vendored-dispatch smoke was removed with ticket #41 |
 | **L4 Proof run** | The only true end-to-end | ticket [#21](https://github.com/juranki/afk-kit/issues/21) — a real ticket carried from `implement #n` to a human-merged pull request |
 

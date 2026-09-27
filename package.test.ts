@@ -18,3 +18,12 @@ test("the package ships without the vendored subagent extension", () => {
 	);
 	expect(fs.existsSync(path.join(repoRoot, "extensions/subagent"))).toBe(false);
 });
+
+test("the package ships without the merge-guard extension", () => {
+	expect(manifest.pi?.extensions ?? []).not.toContain(
+		"./extensions/merge-guard/index.ts",
+	);
+	expect(fs.existsSync(path.join(repoRoot, "extensions/merge-guard"))).toBe(
+		false,
+	);
+});
