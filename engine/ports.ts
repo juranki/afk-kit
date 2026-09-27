@@ -1,30 +1,27 @@
 /**
- * The Engine's typed cycle port (ticket afk-kit #61, durable spec #46):
- * one Implement–Review Cycle — fresh confined Implementer, deterministic
- * Verify, parallel Standards and Spec Reviews — behind a single typed
- * boundary. The Engine owns the transitions and the cap; the port owns the
- * cycle's mechanics. Ticket #61 proves the loop with a scripted port; #62
- * replaces the script with real sessions and Verify execution.
+ * The Engine's typed ports (ticket afk-kit #61 and #63, durable spec
+ * #46): one Implement–Verify leg and one parallel Review round — together
+ * an Implement–Review Cycle — behind typed boundaries. The Engine owns the
+ * transitions and the cap; the ports own the mechanics. #61 proved the
+ * loop with scripted ports; #62 gave the cycle port real sessions and
+ * Verify execution; #63 gives the review port real parallel Reviews over
+ * the pushed candidate.
  *
- * The port returns outcomes, it never throws for cycle results: a cycle
- * that failed returns `failed`, a verdict or fact that must end the Run
- * immediately returns `escalate`.
+ * The ports return outcomes, they never throw for judged results: a leg
+ * that failed returns `failed`/`changes-requested`, a verdict or fact that
+ * must end the Run immediately returns `escalate`.
  */
 
 import type { VerifyResult } from "../extensions/coordinator/prbody.ts";
+import type { ReviewApproval } from "./verdict.ts";
 
-/** One parallel Review's approval, persisted verbatim as evidence. */
-interface CycleApproval {
-	/** Which Review approved: the Standards Review or the Spec Review. */
-	review: "standards" | "spec";
-	/** The approving verdict's structured payload, as the Review returned it. */
-	verdict: Record<string, unknown>;
-}
-
-/** The structured result of one Implement–Review Cycle. */
+/**
+ * The structured result of one Implement–Verify leg: a `verified` cycle
+ * carries no approvals — only the Review gate approves (ticket #63).
+ */
 export type CycleOutcome =
 	| {
-			status: "approved";
+			status: "verified";
 			/** The cycle that ran (1-based). */
 			cycle: number;
 			/**
@@ -32,10 +29,6 @@ export type CycleOutcome =
 			 * become the PR body's verify evidence at handoff.
 			 */
 			verifyResults: VerifyResult[];
-			/** Both parallel Reviews' approvals — the Run's approval evidence. */
-			approvals: CycleApproval[];
-			/** Review notes carried into the PR body, when the Reviews left any. */
-			reviewNotes?: string;
 	  }
 	| {
 			status: "failed";
@@ -52,3 +45,33 @@ export type CycleOutcome =
 
 /** The cycle port: run cycle `n` against the cumulative worktree. */
 export type CyclePort = (cycle: number) => Promise<CycleOutcome>;
+
+/** The structured result of one parallel Review round. */
+export type ReviewOutcome =
+	| {
+			status: "approved";
+			/** The cycle the Reviews judged (1-based). */
+			cycle: number;
+			/** Both parallel Reviews' approvals — the Run's approval evidence. */
+			approvals: ReviewApproval[];
+			/** Review notes carried into the PR body, when the Reviews left any. */
+			reviewNotes?: string;
+	  }
+	| {
+			status: "changes-requested";
+			cycle: number;
+			/** The deterministic failed-cycle evidence: who asked, and what for. */
+			reason: string;
+	  }
+	| {
+			status: "escalate";
+			cycle: number;
+			/** Why the Run must stop immediately and return to the Maintainer. */
+			reason: string;
+	  };
+
+/**
+ * The review port: run the parallel Standards and Spec Reviews for cycle
+ * `n` against the pushed `main...HEAD` diff.
+ */
+export type ReviewPort = (cycle: number) => Promise<ReviewOutcome>;

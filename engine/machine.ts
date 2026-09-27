@@ -16,7 +16,7 @@
  */
 
 import type { ClaimTicketOutcome } from "./claim.ts";
-import type { CycleOutcome } from "./ports.ts";
+import type { CycleOutcome, ReviewOutcome } from "./ports.ts";
 import type {
 	BootstrapInput,
 	BootstrapOutcome,
@@ -26,6 +26,7 @@ import type {
 	HandOffOutcome,
 } from "./pr-ops.ts";
 import type { PrRef } from "./seams.ts";
+import type { ReviewApproval } from "./verdict.ts";
 
 /** The Implement–Review Cycle cap: caps are code paths, not instructions. */
 export const MAX_CYCLES = 3;
@@ -46,13 +47,21 @@ interface RunFacts {
 	pr?: PrRef;
 }
 
-/** The approval evidence an approved cycle hands the Engine. */
+/** A verified cycle's evidence: Verify passed, approvals still unknown. */
+interface VerifiedCycle {
+	cycle: number;
+	/** The cycle's Verify gate results, recorded as the PR body's evidence. */
+	verifyResults: { command: string; ok: boolean }[];
+}
+
+/** The approval evidence a dual approval hands the Engine. */
 interface ApprovedCycle {
 	cycle: number;
 	/** The cycle's Verify gate results, recorded as the PR body's evidence. */
 	verifyResults: { command: string; ok: boolean }[];
 	/** The parallel Reviews' approvals, persisted verbatim. */
-	approvals: unknown[];
+	approvals: ReviewApproval[];
+	/** Review notes carried into the PR body, when the Reviews left any. */
 	reviewNotes?: string;
 }
 
@@ -70,7 +79,14 @@ export type MachineState =
 			claim: ClaimFacts;
 			pr: PrRef;
 			cycle: number;
-			approved: ApprovedCycle;
+			verified: VerifiedCycle;
+	  }
+	| {
+			name: "review";
+			claim: ClaimFacts;
+			pr: PrRef;
+			cycle: number;
+			verified: VerifiedCycle;
 	  }
 	| {
 			name: "handoff";
@@ -97,6 +113,7 @@ export type MachineEvent =
 	| { type: "bootstrap"; outcome: BootstrapOutcome }
 	| { type: "cycle"; outcome: CycleOutcome }
 	| { type: "candidate-push"; outcome: CandidatePushOutcome }
+	| { type: "review"; outcome: ReviewOutcome }
 	| { type: "handoff"; outcome: HandOffOutcome };
 
 /**
@@ -109,6 +126,7 @@ export type MachineEffect =
 	| { type: "bootstrap"; input: BootstrapInput }
 	| { type: "cycle"; cycle: number }
 	| { type: "candidate-push"; input: CandidateInput }
+	| { type: "review"; cycle: number }
 	| { type: "handoff"; input: HandOffInput }
 	| { type: "escalate" };
 
@@ -166,14 +184,10 @@ export function transition(
 				worktree: state.claim.worktree,
 				pr: state.pr,
 			};
-			if (event.outcome.status === "approved") {
-				const approved: ApprovedCycle = {
-					cycle: event.outcome.cycle,
+			if (event.outcome.status === "verified") {
+				const verified: VerifiedCycle = {
+					cycle: state.cycle,
 					verifyResults: event.outcome.verifyResults,
-					approvals: event.outcome.approvals,
-					...(event.outcome.reviewNotes === undefined
-						? {}
-						: { reviewNotes: event.outcome.reviewNotes }),
 				};
 				return {
 					state: {
@@ -181,7 +195,7 @@ export function transition(
 						claim: state.claim,
 						pr: state.pr,
 						cycle: state.cycle,
-						approved,
+						verified,
 					},
 					effect: {
 						type: "candidate-push",
@@ -210,6 +224,68 @@ export function transition(
 				effect: { type: "cycle", cycle: state.cycle + 1 },
 			};
 		}
+		case "review": {
+			if (event.type !== "review") break;
+			const facts: RunFacts = {
+				branch: state.claim.branch,
+				worktree: state.claim.worktree,
+				pr: state.pr,
+			};
+			if (event.outcome.status === "approved") {
+				// Only dual approval reaches the handoff (ticket #63).
+				const approved: ApprovedCycle = {
+					cycle: state.cycle,
+					verifyResults: state.verified.verifyResults,
+					approvals: event.outcome.approvals,
+					...(event.outcome.reviewNotes === undefined
+						? {}
+						: { reviewNotes: event.outcome.reviewNotes }),
+				};
+				return {
+					state: {
+						name: "handoff",
+						claim: state.claim,
+						pr: state.pr,
+						cycle: state.cycle,
+						approved,
+					},
+					effect: {
+						type: "handoff",
+						input: {
+							issue: state.claim.issue,
+							branch: state.claim.branch,
+							worktree: state.claim.worktree,
+							verifyResults: approved.verifyResults,
+							...(approved.reviewNotes === undefined
+								? {}
+								: { reviewNotes: approved.reviewNotes }),
+						},
+					},
+				};
+			}
+			if (event.outcome.status === "escalate" || state.cycle >= MAX_CYCLES) {
+				return {
+					state: {
+						name: "escalated",
+						reason: event.outcome.reason,
+						stage: "review",
+						cycle: state.cycle,
+						facts,
+					},
+					effect: { type: "escalate" },
+				};
+			}
+			// Findings ride into the next fresh Implementer; the commits stay.
+			return {
+				state: {
+					name: "cycle",
+					claim: state.claim,
+					pr: state.pr,
+					cycle: state.cycle + 1,
+				},
+				effect: { type: "cycle", cycle: state.cycle + 1 },
+			};
+		}
 		case "publish": {
 			if (event.type !== "candidate-push") break;
 			const facts: RunFacts = {
@@ -229,26 +305,17 @@ export function transition(
 					effect: { type: "escalate" },
 				};
 			}
+			// The candidate is pushed: the Reviews now judge the complete
+			// pushed `main...HEAD` diff (ticket #63).
 			return {
 				state: {
-					name: "handoff",
+					name: "review",
 					claim: state.claim,
 					pr: state.pr,
 					cycle: state.cycle,
-					approved: state.approved,
+					verified: state.verified,
 				},
-				effect: {
-					type: "handoff",
-					input: {
-						issue: state.claim.issue,
-						branch: state.claim.branch,
-						worktree: state.claim.worktree,
-						verifyResults: state.approved.verifyResults,
-						...(state.approved.reviewNotes === undefined
-							? {}
-							: { reviewNotes: state.approved.reviewNotes }),
-					},
-				},
+				effect: { type: "review", cycle: state.cycle },
 			};
 		}
 		case "handoff": {
