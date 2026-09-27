@@ -219,8 +219,9 @@ function refused(
 	return { status: "refused", issue, branch, text };
 }
 
-/** The draft body: the convention's shape with verify commands pending. */
-function draftPrBody(issueBody: string, issue: number): string {
+/** The draft body: the convention's shape with verify commands pending.
+ * Exported for its L1 tests. */
+export function draftPrBody(issueBody: string, issue: number): string {
 	const brief = parseBrief(issueBody);
 	const lines: string[] = [
 		`Closes #${issue}`,
@@ -496,11 +497,7 @@ export async function pushCandidate(
 				branch,
 			);
 		}
-		const head = await gitExpect(
-			["rev-parse", "HEAD"],
-			worktree,
-			"read HEAD",
-		);
+		const head = await gitExpect(["rev-parse", "HEAD"], worktree, "read HEAD");
 		const remote = await gitOut(["rev-parse", `origin/${branch}`], worktree);
 		const remoteHead = remote.exitCode === 0 ? remote.stdout.trim() : "";
 		if (remoteHead === head) {
