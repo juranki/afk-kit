@@ -14,7 +14,7 @@
 import type { VerifyResult } from "../extensions/coordinator/prbody.ts";
 
 /** One parallel Review's approval, persisted verbatim as evidence. */
-export interface CycleApproval {
+interface CycleApproval {
 	/** Which Review approved: the Standards Review or the Spec Review. */
 	review: "standards" | "spec";
 	/** The approving verdict's structured payload, as the Review returned it. */

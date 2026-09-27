@@ -31,7 +31,7 @@ import type { PrRef } from "./seams.ts";
 export const MAX_CYCLES = 3;
 
 /** The facts a surviving Claim carries through the rest of the Run. */
-export interface ClaimFacts {
+interface ClaimFacts {
 	issue: number;
 	branch: string;
 	/** The fetched origin/main SHA the branch starts from. */
@@ -40,14 +40,14 @@ export interface ClaimFacts {
 }
 
 /** Run facts as they become known; the driver merges the Ticket number in. */
-export interface RunFacts {
+interface RunFacts {
 	branch?: string;
 	worktree?: string;
 	pr?: PrRef;
 }
 
 /** The approval evidence an approved cycle hands the Engine. */
-export interface ApprovedCycle {
+interface ApprovedCycle {
 	cycle: number;
 	/** The cycle's Verify gate results, recorded as the PR body's evidence. */
 	verifyResults: { command: string; ok: boolean }[];
