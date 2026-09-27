@@ -1,0 +1,20 @@
+# Minimal CI: the code-verify standard's canonical command on every pull
+# request. The job id "verify" is the check name cited as the branch
+# protection required check (map #43: tickets #47 and #48).
+name: verify
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install && bun run verify

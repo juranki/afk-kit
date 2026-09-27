@@ -230,7 +230,11 @@ export async function runDriftReview(repoRoot: string): Promise<DriftOutcome> {
 	const result = spawnSync(
 		"pi",
 		["-p", "--no-session", "--model", "glm-5.3-flash", buildPrompt(repoRoot)],
-		{ encoding: "utf-8", maxBuffer: 16 * 1024 * 1024 },
+		// The child environment is passed explicitly so the PATH stub wins on
+		// every bun: 1.3.14 resolves a bare command against the process's real
+		// environ, finding the real pi in node_modules/.bin over the test's
+		// injected PATH.
+		{ encoding: "utf-8", maxBuffer: 16 * 1024 * 1024, env: process.env },
 	);
 	if (result.error) {
 		return {
