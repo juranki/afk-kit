@@ -400,14 +400,12 @@ export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 		);
 		deadlineTimer.unref?.();
 	}
+	const requestSignal = (signal: string) =>
+		interruption.request(`interrupted by ${signal}`);
 	const uninstallSignals =
 		options.installSignals === undefined
-			? installProcessSignals((signal) =>
-					interruption.request(`interrupted by ${signal}`),
-				)
-			: options.installSignals((signal) =>
-					interruption.request(`interrupted by ${signal}`),
-				);
+			? installProcessSignals(requestSignal)
+			: options.installSignals(requestSignal);
 
 	try {
 		return await driveLocked(handle, seams, runCycle, runReviews, io, {
@@ -581,22 +579,29 @@ async function driveLocked(
 				),
 		);
 		let settleCapTimer: ReturnType<typeof setTimeout> | undefined;
+		let notifyCap: (() => void) | null = null;
 		const capFired = new Promise<false>((resolve) => {
-			const off = interruption.onRequest((reason) => {
-				off();
-				settleCapTimer = setTimeout(() => resolve(false), settleCapMs);
-				settleCapTimer.unref?.();
-				void reason;
-			});
+			notifyCap = () => resolve(false);
 		});
-		const raced = await Promise.race([
-			execution.then((outcome): { settled: true; outcome: OpOutcome } => ({
-				settled: true,
-				outcome,
-			})),
-			capFired.then((): { settled: false } => ({ settled: false })),
-		]);
-		clearTimeout(settleCapTimer);
+		// Registered only for this operation's wait, removed when it ends:
+		// a settled operation never inherits the next one's settle timer.
+		const offCap = interruption.onRequest(() => {
+			settleCapTimer = setTimeout(notifyCap, settleCapMs);
+			settleCapTimer.unref?.();
+		});
+		let raced: { settled: true; outcome: OpOutcome } | { settled: false };
+		try {
+			raced = await Promise.race([
+				execution.then((outcome): { settled: true; outcome: OpOutcome } => ({
+					settled: true,
+					outcome,
+				})),
+				capFired.then((): { settled: false } => ({ settled: false })),
+			]);
+		} finally {
+			clearTimeout(settleCapTimer);
+			offCap();
+		}
 		const interruptedNow = interruption.reason() !== null && !interruptHandled;
 		let settledOutcome: OpOutcome | null = raced.settled ? raced.outcome : null;
 

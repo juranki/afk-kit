@@ -9,8 +9,13 @@
  * durable Escalation could not complete.
  */
 
+import * as os from "node:os";
+import * as path from "node:path";
+import { runGit } from "../extensions/coordinator/git.ts";
+import { runGh } from "../extensions/readiness/gh.ts";
 import { runImplement } from "./implement.ts";
 import { afkStateRoot } from "./runs/paths.ts";
+import { finalizeInterruptedRun } from "./runs/reconcile.ts";
 import {
 	collectStatus,
 	ghPrLookup,
@@ -100,6 +105,18 @@ async function statusCommand(args: string[], io: CliIo): Promise<number> {
 		// Default lookup reads merge state via gh, best-effort; pass null to
 		// stay offline. Failures degrade to "not known to be merged".
 		prLookup: ghPrLookup(io.cwd),
+		// A dead-lock Run's interruption is materialized here — idempotently
+		// (ticket #65): the next status converges it to one Escalation.
+		finalizeInterrupted: (dir) =>
+			finalizeInterruptedRun(dir, {
+				seams: {
+					gh: runGh(io.cwd),
+					git: runGit(),
+					checkout: io.cwd,
+					// The worktree-root convention (claim ops).
+					worktreeRoot: path.join(os.homedir(), "wt"),
+				},
+			}),
 	});
 	io.stdout(`${renderStatus(report)}\n`);
 	return 0;

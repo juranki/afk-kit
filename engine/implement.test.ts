@@ -17,7 +17,7 @@ import { runCli } from "./cli.ts";
 import { runImplement } from "./implement.ts";
 import { RUN_EVENT_NAMES, readRunEvents } from "./runs/events.ts";
 import { issueRunsDir, repositoryStateRoot } from "./runs/paths.ts";
-import { createRun } from "./runs/store.ts";
+import { createRun, recordEvent } from "./runs/store.ts";
 import {
 	cleanupWorld,
 	type GhRule,
@@ -390,6 +390,73 @@ describe("runImplement (L2)", () => {
 		expect(String(outcomes.find(Boolean)?.payload.reason)).toContain(
 			"prior-runs",
 		);
+
+		cleanupWorld(f.world);
+	});
+
+	test("a dead-lock prior Run's interruption is materialized, then the start proceeds", async () => {
+		const f = await fixture([
+			readinessRule(PASSING_BODY),
+			{
+				args: ["issue", "view", String(ISSUE), "--json", "labels"],
+				json: { labels: [{ name: "ready-for-agent" }] },
+			},
+			{
+				args: ["issue", "view", String(ISSUE), "--json", "comments"],
+				json: { comments: [] },
+			},
+			{ args: ["issue", "comment", String(ISSUE)], json: {} },
+			{
+				args: ["issue", "edit", String(ISSUE), "--add-label", "needs-info"],
+				json: {},
+			},
+		]);
+		// A prior Run whose process died mid-drive: a dead active PID and an
+		// uncertain cycle operation in the journal.
+		const prior = createRun({
+			stateRoot: path.join(f.xdg, "afk"),
+			owner: "juranki",
+			repo: "afk-kit",
+			ticket: ISSUE,
+			brief: "an interrupted attempt",
+		});
+		fs.writeFileSync(
+			prior.lockPath,
+			JSON.stringify({
+				pid: 2147479999,
+				token: "dead",
+				startedAt: "2026-09-27T12:00:00Z",
+			}),
+			{ mode: 0o600 },
+		);
+		recordEvent(prior, {
+			name: RUN_EVENT_NAMES.sideEffectIntent,
+			payload: { operation: "cycle", cycle: 1 },
+			op: `cycle:${ISSUE}:1`,
+			cycle: 1,
+		});
+
+		const exit = await f.run();
+
+		// The materialized Escalation cleared the way: the start proceeds
+		// to the Claim seam instead of refusing on the prior Run.
+		expect(exit).toBe(0);
+		// Exactly one interruption status comment was posted.
+		const comments = f.world
+			.argvLog()
+			.filter((c) => c.startsWith("issue comment"));
+		expect(comments).toHaveLength(1);
+		// The prior Run is terminal; the new Run waits at the Claim seam.
+		const priorOutcome = readRunEvents(prior.eventsPath).events.find(
+			(e) => e.name === RUN_EVENT_NAMES.outcome,
+		);
+		expect(priorOutcome?.payload.outcome).toBe("escalated");
+		const newRunDir = fs
+			.readdirSync(runsDir(f.xdg))
+			.map((id) => path.join(runsDir(f.xdg), id))
+			.find((dir) => dir !== prior.dir);
+		expect(newRunDir).toBeDefined();
+		expect(fs.existsSync(path.join(newRunDir ?? "", "lock"))).toBe(false);
 
 		cleanupWorld(f.world);
 	});

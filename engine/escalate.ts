@@ -89,23 +89,53 @@ export async function escalateRun(
 		};
 	}
 
+	// Idempotency (ticket #65): if this Run's escalation comment already
+	// exists — a crash between the post and the Run's outcome record — the
+	// comment is never posted twice. Any other read failure degrades to
+	// posting, which duplicates at worst one comment; skipping a needed
+	// post would leave the Ticket without its status comment.
+	let commentPosted = true;
+	try {
+		const { stdout } = await seams.gh([
+			"issue",
+			"view",
+			String(issue),
+			"--json",
+			"comments",
+		]);
+		const comments = (
+			JSON.parse(stdout) as {
+				comments?: { body?: string }[];
+			}
+		).comments?.map((c) => c.body ?? "");
+		commentPosted = !comments?.some((body) =>
+			body.includes(`ESCALATION: Run ${facts.run} `),
+		);
+	} catch {
+		commentPosted = true;
+	}
+
 	const tracker = async (args: string[]): Promise<void> => {
 		const r = await seams.gh(args);
 		if (r.exitCode !== 0) throw new Error(r.stderr.trim());
 	};
 
 	const steps: { name: string; action: () => Promise<void> }[] = [
-		{
-			name: "post the status comment",
-			action: () =>
-				tracker([
-					"issue",
-					"comment",
-					String(issue),
-					"--body",
-					statusComment(facts),
-				]),
-		},
+		...(commentPosted
+			? [
+					{
+						name: "post the status comment" as const,
+						action: () =>
+							tracker([
+								"issue",
+								"comment",
+								String(issue),
+								"--body",
+								statusComment(facts),
+							]),
+					},
+				]
+			: []),
 		{
 			name: "apply needs-info",
 			action: () =>

@@ -15,6 +15,7 @@ import { parseImplementArgs, parseStatusArgs, runCli } from "./cli.ts";
 import { RUN_EVENT_NAMES } from "./runs/events.ts";
 import { afkStateRoot } from "./runs/paths.ts";
 import { createRun, recordEvent } from "./runs/store.ts";
+import { cleanupWorld, makeWorld } from "./test-world.ts";
 
 describe("parseImplementArgs", () => {
 	test("accepts exactly one bare positive integer", () => {
@@ -217,3 +218,70 @@ function acquireHeld(handle: Parameters<typeof recordEvent>[0]): void {
 		cycle: 1,
 	});
 }
+
+describe("runCli status: interruption finalization (ticket #65)", () => {
+	test("the next status materializes a dead-lock Run's interruption Escalation", async () => {
+		const world = await makeWorld(65, "Reconcile interrupted Runs", [
+			{
+				args: ["issue", "view", "65", "--json", "labels"],
+				json: {
+					labels: [{ name: "ready-for-agent" }, { name: "in-progress" }],
+				},
+			},
+			{
+				args: ["issue", "view", "65", "--json", "comments"],
+				json: { comments: [] },
+			},
+			{ args: ["issue", "comment", "65"], json: {} },
+			{
+				args: ["issue", "edit", "65", "--add-label", "needs-info"],
+				json: {},
+			},
+			{
+				args: ["issue", "edit", "65", "--remove-label", "in-progress"],
+				json: {},
+			},
+		]);
+		try {
+			const xdg = stateRoot();
+			const run = createRun({
+				stateRoot: afkStateRoot({ XDG_STATE_HOME: xdg }),
+				owner: "juranki",
+				repo: "afk-kit",
+				ticket: 65,
+				brief: "brief",
+			});
+			// A dead active PID: the Run was working and its process died.
+			fs.writeFileSync(
+				run.lockPath,
+				JSON.stringify({
+					pid: 2147479999,
+					token: "dead",
+					startedAt: "2026-09-27T12:00:00Z",
+				}),
+				{ mode: 0o600 },
+			);
+			recordEvent(run, {
+				name: RUN_EVENT_NAMES.sideEffectIntent,
+				payload: { operation: "cycle", cycle: 1 },
+				op: "cycle:65:1",
+				cycle: 1,
+			});
+
+			const { io: cliIo, out } = io(checkout(), { XDG_STATE_HOME: xdg });
+			const exit = await runCli(["status", "65"], cliIo);
+
+			expect(exit).toBe(0);
+			// The Run is now durably escalated and shown as action required.
+			expect(out.join("")).toContain("ACTION REQUIRED");
+			expect(out.join("")).toContain("escalated");
+			// Exactly one status comment was posted.
+			const comments = world
+				.argvLog()
+				.filter((c) => c.startsWith("issue comment"));
+			expect(comments).toHaveLength(1);
+		} finally {
+			await cleanupWorld(world);
+		}
+	});
+});
