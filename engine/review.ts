@@ -184,29 +184,12 @@ export function createReviewPort(deps: ReviewPortDeps): ReviewPort {
 		});
 	};
 
-	const runSide = async (role: ReviewRole, cycle: number): Promise<SideRun> => {
-		// Claim facts, as the driving loop recorded them.
-		const events = readRunEvents(handle.eventsPath).events;
-		const facts = foldRunEvents(events);
-		const worktree = facts?.worktree;
-		const branch = facts?.branch;
-		if (!worktree || !branch) {
-			throw new Error(
-				`review ${String(cycle)} cannot run: the Run records no worktree yet`,
-			);
-		}
-
-		// The complete pushed main...HEAD diff, computed in the worktree and
-		// kept verbatim as evidence — the artifact both Reviews judge.
-		const diff = await seams.git(["diff", "main...HEAD"], worktree);
-		if (diff.exitCode !== 0) {
-			throw new Error(
-				`review ${String(cycle)} cannot read the candidate diff: ${diff.stderr.trim()}`,
-			);
-		}
-		const reviewsDir = artifactDir(handle, `cycle-${String(cycle)}`, "reviews");
-		const diffPath = path.join(reviewsDir, "diff.patch");
-		fs.writeFileSync(diffPath, diff.stdout, { mode: 0o600 });
+	const runSide = async (
+		role: ReviewRole,
+		cycle: number,
+		facts: { worktree: string; branch: string; diffPath: string },
+	): Promise<SideRun> => {
+		const { worktree, branch, diffPath } = facts;
 
 		const prompt =
 			role === "standards"
@@ -282,11 +265,34 @@ export function createReviewPort(deps: ReviewPortDeps): ReviewPort {
 	};
 
 	return async (cycle: number): Promise<ReviewOutcome> => {
+		// Claim facts, as the driving loop recorded them.
+		const events = readRunEvents(handle.eventsPath).events;
+		const facts = foldRunEvents(events);
+		const worktree = facts?.worktree;
+		const branch = facts?.branch;
+		if (!worktree || !branch) {
+			throw new Error(
+				`review ${String(cycle)} cannot run: the Run records no worktree yet`,
+			);
+		}
+
+		// The complete pushed main...HEAD diff, computed once in the worktree
+		// and kept verbatim as evidence — the artifact both Reviews judge.
+		const diff = await seams.git(["diff", "main...HEAD"], worktree);
+		if (diff.exitCode !== 0) {
+			throw new Error(
+				`review ${String(cycle)} cannot read the candidate diff: ${diff.stderr.trim()}`,
+			);
+		}
+		const reviewsDir = artifactDir(handle, `cycle-${String(cycle)}`, "reviews");
+		const diffPath = path.join(reviewsDir, "diff.patch");
+		fs.writeFileSync(diffPath, diff.stdout, { mode: 0o600 });
+
 		// Both Reviews run concurrently; allSettled lets both finish even
 		// when one throws, so no evidence or sibling session is abandoned.
 		const settled = await Promise.allSettled([
-			runSide("standards", cycle),
-			runSide("spec", cycle),
+			runSide("standards", cycle, { worktree, branch, diffPath }),
+			runSide("spec", cycle, { worktree, branch, diffPath }),
 		]);
 		for (const outcome of settled) {
 			if (outcome.status === "rejected") {

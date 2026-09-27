@@ -220,7 +220,7 @@ function createDefinitionSessionFactory(
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: request.worktree,
 			// Off-tree and unused: discovery is off and settings are in-memory.
-			agentDir: path.join(os.tmpdir(), "afk-implementer-agent"),
+			agentDir: path.join(os.tmpdir(), "afk-engine-agent"),
 			systemPrompt: definition.body,
 			noExtensions: true,
 			noSkills: true,
