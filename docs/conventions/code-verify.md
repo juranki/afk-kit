@@ -5,8 +5,7 @@ the toolchain, and the canonical command every afk-kit brief's **Verify
 commands** field cites. Resolved on
 ticket #12. Target repositories define their own verify commands in their
 briefs; this standard governs afk-kit's own tickets. The
-[package verify commands](package-verify.md) remain canonical for package and
-vendored-integrity work.
+[package verify commands](package-verify.md) remain canonical for package work.
 
 ## Tests come first
 
@@ -22,9 +21,9 @@ invents its own notion of "tested".
 
 | Layer | Covers | How |
 | --- | --- | --- |
-| **L1 Unit** | The fork's decision logic — verdict parsing (R6), status-file handling and cancel mapping (R8), shim rule evaluation (R5) | `bun test` — offline, no git, no network |
+| **L1 Unit** | Deterministic decision logic — readiness parsing, branch naming, pull-request shaping, merge-guard evaluation, and package resources | `bun test` — offline, no git, no network |
 | **L2 Seam-integration** | Coordinator mechanics (claim + worktree + branch, push + PR, merge guard) against faked seams | `bun test` with real `git` against a local bare repo and a stubbed `gh` on `PATH` |
-| **L3 Live smoke** | A real child `pi` dispatch through the vendored mechanism | `scripts/smoke-dispatch.sh` — manual, run when dispatch-path code changes; never part of `bun run verify` |
+| **L3 Live smoke** | Runtime integration that requires a real pi process | No current command; the retired vendored-dispatch smoke was removed with ticket #41 |
 | **L4 Proof run** | The only true end-to-end | ticket [#21](https://github.com/juranki/afk-kit/issues/21) — a real ticket carried from `implement #n` to a human-merged pull request |
 
 ## Faking the seams (L2)
@@ -43,21 +42,12 @@ breaks.
 
 ## Harness rules
 
-- Tests are **colocated** as `*.test.ts` beside the code they test. The pi
-  manifest loads only its listed extensions and prompts, so tests never load at
-  runtime.
-- Every fork addition's decision logic gets L1 tests; every coordinator
-  operation gets L2.
-- **Vendored upstream code is not unit-tested.** Its integrity is owned by
-  `sha256sum -c VENDORED.sha256` and the package verify commands; only the
-  seams afk-kit changes get tests.
-- The implementer shim's **allow/refuse matrix is exercised as subprocess tests
-  under `bun test`**, whatever language the hardened shim is written in (the
-  prototype is shell; ADR 0007 leaves the form open): spawn a shim'd `PATH`,
-  attempt allowed and refused commands, assert the `CONFINEMENT_REFUSAL`
-  markers.
-- **No coverage-percentage gate.** The rule is the two bullets above, and
-  nothing ceremonial on top.
+- Tests are **colocated** as `*.test.ts` beside the code or public package seam
+  they test. The pi manifest loads only its listed extensions and skills, so tests
+  never load at runtime.
+- Every deterministic decision gets L1 tests; every coordinator operation gets L2.
+- **No coverage-percentage gate.** The layer rules above are the gate; nothing
+  ceremonial sits on top.
 
 ## Toolchain and the canonical command
 
@@ -68,10 +58,6 @@ breaks.
   Rules are added only when one bites, each with a comment in `biome.jsonc`.
 - **Dead dependencies, code, exports:** knip, entry points mirroring the pi
   manifest; peer dependencies are runtime-provided by pi.
-- **Scope boundary:** Biome and knip exclude the vendored tree today. When the
-  fork modifies a vendored file, that file is already off `VENDORED.sha256` —
-  it leaves the exclusions and gets linted. Re-scoping the sha manifest itself
-  is the first fork-modifying ticket's job (#16 is first in line).
 
 Every afk-kit brief's **Verify commands** cites by default:
 
@@ -81,7 +67,6 @@ bun install && bun run verify
 
 where `verify` runs `bun test --pass-with-no-tests && biome check . && knip`
 (the flag keeps the canonical command green until the first tests land).
-Area-specific extras
-stack on top of the default: the sha check for vendored-file work, the
-[package verify commands](package-verify.md) for manifest/install work, the L3
-smoke for dispatch-path work.
+Area-specific extras stack on top of the default: use the
+[package verify commands](package-verify.md) for manifest/install work and add an
+L3 smoke when runtime integration requires a real pi process.

@@ -1,23 +1,14 @@
 {
 	// Dead-code/dependency/export detection. Entry points mirror the pi
-	// manifest (package.json "pi" field): the vendored subagent extension is
-	// what pi loads at runtime; colocated *.test.ts files import the fork's
-	// exports, so they are entries too. peerDependencies are runtime-provided
-	// by pi (they are also pinned devDependencies so bun test can resolve the
-	// module graph). scripts/drift-review.ts needs no entry: the verify script
-	// that runs it (ADR 0013's agentic drift review) already makes it one, and
-	// its colocated test is picked up like the others.
-	//
-	// Scope boundary mirrors biome.jsonc: ticket #16 forked index.ts,
-	// agents.ts, and README.md out of the vendored tree, so the whole-directory
-	// ignore shrank to the still-unmodified vendored files.
+	// manifest (package.json "pi" field); colocated *.test.ts files are entries
+	// too. peerDependencies are runtime-provided by pi (they are also pinned
+	// devDependencies so bun test can resolve the module graph).
 	"$schema": "./node_modules/knip/schema.json",
 	"entry": [
-		"extensions/subagent/index.ts",
 		"extensions/readiness/index.ts",
 		"extensions/coordinator/index.ts",
 		"extensions/merge-guard/index.ts",
-		"extensions/subagent/**/*.test.ts",
+		"scripts/**/*.test.ts",
 		"extensions/readiness/**/*.test.ts",
 		"extensions/coordinator/**/*.test.ts",
 		"extensions/merge-guard/**/*.test.ts"

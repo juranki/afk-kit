@@ -3,10 +3,9 @@
 Session-bound, client-side enforcement of the merge gate
 ([ADR 0011](../../../docs/adr/0011-merge-guard-session-bound-client-side-enforcement.md),
 ticket afk-kit #23): no agent session merges a pull request or pushes to
-`main`, in every pi session where afk-kit is installed — coordinators,
-subagent children (fresh pi processes), and the maintainer's own interactive
-sessions. No arming, no per-session opt-in: a guard that must be armed can
-silently fail to arm (ADR 0011).
+`main`, in every pi session where afk-kit is installed — coordinators and the
+maintainer's own interactive sessions. No arming, no per-session opt-in: a guard
+that must be armed can silently fail to arm (ADR 0011).
 
 ## What it refuses
 
@@ -105,10 +104,9 @@ and other reads, the coordinator ops (`claim_issue`, `publish_pr`),
 local `git merge`, `git pull`/`git fetch` of `main`. So are commands whose
 flag payloads merely quote the trigger patterns — a `gh issue comment`
 whose `--body` says `gh pr merge`, an inline `node -e` script containing
-the endpoint path: payload text is data, not command (#36). Other
-extensions' tools (the subagent tool, readiness check, coordinator tools)
-are not shell invocations and are simply not inspected; subagent children
-are bound by their own loaded copy of this guard.
+the endpoint path: payload text is data, not command (#36). Other extensions'
+tools (the readiness check and coordinator tools) are not shell invocations and
+are simply not inspected.
 
 ## The honest strength bar
 
@@ -121,8 +119,8 @@ goes out of its way, and the bypasses are documented, not hidden:
 
 - **Editing or uninstalling the toolkit between sessions** — the documented
   bypass chain. The guard is code on disk; a session that edits afk-kit or
-  removes it has left the gate's jurisdiction. Detection of that is the
-  `VENDORED.sha256` manifest and review, not this hook.
+  removes it has left the gate's jurisdiction. Detection belongs to repository
+  review, not this hook.
 - **The maintainer's own hand outside any session** — a plain terminal, or
   the github.com UI, is "outside maintainer action" by definition (ADR
   0011). The TUI's `!` shell escape is likewise the human's own verbatim

@@ -3,7 +3,7 @@
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
-	"description": "AFK delivery toolkit for pi: coordinator mechanics, the vendored subagent mechanism, and workflow skills",
+	"description": "AFK delivery toolkit for pi: coordinator mechanics and workflow skills",
 	"keywords": [
 		"pi-package"
 	],
@@ -15,30 +15,20 @@
 	},
 	"pi": {
 		"extensions": [
-			"./extensions/subagent/index.ts",
 			"./extensions/readiness/index.ts",
 			"./extensions/coordinator/index.ts",
 			"./extensions/merge-guard/index.ts"
 		],
 		"skills": [
 			"./skills"
-		],
-		"prompts": [
-			"./extensions/subagent/prompts"
 		]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-ai": "*",
-		"@earendil-works/pi-agent-core": "*",
 		"@earendil-works/pi-coding-agent": "*",
-		"@earendil-works/pi-tui": "*",
 		"typebox": "*"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-agent-core": "0.85.1",
-		"@earendil-works/pi-ai": "0.85.1",
 		"@earendil-works/pi-coding-agent": "0.85.1",
-		"@earendil-works/pi-tui": "0.85.1",
 		"typebox": "1.3.7",
 		"@biomejs/biome": "2.5.14",
 		"knip": "6.37.0"

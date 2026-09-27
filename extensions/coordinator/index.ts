@@ -1,7 +1,7 @@
 /**
  * Coordinator mechanics (R7, ticket afk-kit #19): the deterministic
  * coordinator-side operations as registered tools — the same mechanism as
- * the subagent tool, the readiness check, and the merge guard (ADR 0006):
+ * the readiness check and merge guard (ADR 0006):
  *
  *   claim_issue  — the atomic claim: embeds the readiness check (refusing
  *                  with READINESS_REFUSAL and claiming nothing on failure),

@@ -1,7 +1,10 @@
 # Vendored subagent mechanism
 
-- **Status:** Accepted
+- **Status:** Deprecated
 - **Date:** 2026-09-13
+- **Deprecated:** 2026-09-26 — ticket #41 removed the vendored extension under
+  [the deterministic-coordinator pivot map](https://github.com/juranki/afk-kit/issues/43).
+  The pivot's successor ADR will supersede this historical rationale.
 
 The toolkit's delegation half is a **vendored fork of pi's example `subagent`
 extension** (`examples/extensions/subagent/`, MIT): one child `pi --mode json -p

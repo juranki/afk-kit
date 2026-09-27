@@ -3,8 +3,8 @@
  * client-side enforcement of the merge gate at the tool boundary. A
  * `tool_call` hook inspects every shell invocation — `bash` and
  * `powershell` — in every pi session where afk-kit is installed:
- * coordinators, subagent children (fresh pi processes), and the
- * maintainer's own interactive sessions. Merge-capable invocations —
+ * coordinators and the maintainer's own interactive sessions. Merge-capable
+ * invocations —
  * `gh pr merge`, the pull-request merge API, `git push` targeting `main` —
  * refuse with a structured `MERGE_GATE_REFUSAL` (guard.ts) that names the
  * gate and instructs stop-and-report per the escalation convention; the
