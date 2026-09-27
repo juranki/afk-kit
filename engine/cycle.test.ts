@@ -1,12 +1,12 @@
 /**
- * L2 seam-integration tests for the real Implement–Review Cycle port
+ * L2 seam-integration tests for the real Implement–Verify Cycle port
  * (ticket afk-kit #62, durable spec #46): one fresh confined Implementer
  * session, the observed-fact done checks, deterministic Verify execution,
- * complete cycle evidence, and the approved cycle feeding the additive
- * candidate push. The tracker/Git seams run for real — a local bare
- * remote, a stub `gh` on PATH — the confinement runtime is a fake at its
- * library port, and the SDK session is scripted behind its factory seam
- * (code-verify standard).
+ * and the complete cycle evidence feeding the additive candidate push and
+ * the Review gate (ticket #63). The tracker/Git seams run for real — a
+ * local bare remote, a stub `gh` on PATH — the confinement runtime is a
+ * fake at its library port, and the SDK session is scripted behind its
+ * factory seam (code-verify standard).
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -300,6 +300,16 @@ async function runDrivenWorld(
 		handle: started.handle,
 		seams: started.world.seams,
 		runCycle: port,
+		// The cycle tests judge the Implement–Verify leg; a scripted dual
+		// approval keeps the Review gate out of their way.
+		runReviews: async (cycle) => ({
+			status: "approved",
+			cycle,
+			approvals: [
+				{ review: "standards", verdict: { verdict: "approve" } },
+				{ review: "spec", verdict: { verdict: "approve" } },
+			],
+		}),
 		io: {
 			stdout: () => {},
 			stderr: (t) => {
@@ -393,14 +403,14 @@ describe("createCyclePort: the approved path", () => {
 		).toBe(true);
 	});
 
-	test("the approved cycle carried both verify results into the machine", () => {
+	test("the verified cycle carried both verify results into the machine", () => {
 		const cycleResult = JSON.parse(
 			fs.readFileSync(
 				path.join(result.started.handle.artifactsDir, "cycle-1", "result.json"),
 				"utf8",
 			),
 		) as { status: string; verifyResults: { command: string; ok: boolean }[] };
-		expect(cycleResult.status).toBe("approved");
+		expect(cycleResult.status).toBe("verified");
 		expect(cycleResult.verifyResults).toEqual([
 			{ command: "git rev-parse --is-inside-work-tree", ok: true },
 			{ command: "test -f src/feature.txt", ok: true },
@@ -457,7 +467,10 @@ describe("createCyclePort: failed cycles", () => {
 				fs.mkdirSync(path.join(worktree, "src"), {
 					recursive: true,
 				});
-				fs.writeFileSync(path.join(worktree, "src", "feature.txt"), "done\n");
+				fs.writeFileSync(
+					path.join(worktree, "src", "feature.txt"),
+					`done in cycle ${String(cycle)}\n`,
+				);
 				await implementFeature(worktree, git);
 			},
 		});

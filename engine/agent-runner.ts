@@ -1,13 +1,13 @@
 /**
- * The Implementer agent runner (ticket afk-kit #62, durable spec #46):
- * each cycle launches exactly one fresh session and prompts it exactly
- * once — an aborted or completed session is never prompted again — under
- * a wall-clock cap that aborts the run. The complete SDK event stream is
+ * The agent runner (ticket afk-kit #62 and #63, durable spec #46): each
+ * launch — an Implementer inside its cycle, or one of the two parallel
+ * Reviewers — runs in exactly one fresh session prompted exactly once — an
+ * aborted or completed session is never prompted again — under a
+ * wall-clock cap that aborts the run. The complete SDK event stream is
  * appended to the Run's evidence file as it arrives, so persistence never
  * waits for the session to finish. The session itself stays behind a
  * structural seam: tests script it (L2), production builds it from the
- * package-owned definition with confined tools (real SDK dispatch is L3,
- * the proof run is L4).
+ * package-owned definition (real SDK dispatch is L3, the proof run is L4).
  */
 
 import * as fs from "node:fs";
@@ -37,7 +37,7 @@ export interface AgentSessionLike {
 }
 
 /** Everything one session launch needs; the request is the prompt's facts. */
-export interface ImplementerSpawnRequest {
+export interface AgentSpawnRequest {
 	/** The worktree the session works in (its cwd). */
 	worktree: string;
 	/** The one prompt this fresh session is given. */
@@ -53,14 +53,14 @@ export type SessionFactory = (
 	request: ImplementerSpawnRequest,
 ) => Promise<AgentSessionLike>;
 
-export interface ImplementerSpawnOutcome {
+export interface AgentSpawnOutcome {
 	/** `"aborted"` when the cap fired; `"completed"` on a normal finish. */
 	stop: "completed" | "aborted";
 	/** The final assistant text; empty on an aborted run. */
 	resultText: string;
 }
 
-export interface ImplementerRunnerPorts {
+export interface AgentRunnerPorts {
 	createSession?: SessionFactory;
 }
 
@@ -75,14 +75,14 @@ function appendEvent(eventsPath: string, event: unknown): void {
 }
 
 /**
- * Run one Implementer session: fresh session, one prompt, live event
+ * Run one agent session: fresh session, one prompt, live event
  * persistence, wall-clock cap with abort. The outcome's stop reason is a
- * fact the cycle judges — this function never judges done itself.
+ * fact the caller judges — this function never judges the result itself.
  */
-export async function runImplementerSession(
-	request: ImplementerSpawnRequest,
-	ports: ImplementerRunnerPorts = {},
-): Promise<ImplementerSpawnOutcome> {
+export async function runAgentSession(
+	request: AgentSpawnRequest,
+	ports: AgentRunnerPorts = {},
+): Promise<AgentSpawnOutcome> {
 	const createSession = ports.createSession;
 	if (createSession === undefined) {
 		throw new Error(
@@ -182,21 +182,22 @@ export function parseAgentDefinition(text: string): AgentDefinition {
 
 /**
  * The production session factory (L3): builds one fresh SDK session per
- * launch from the package-owned definition — its model pin, its thinking
- * pin, its tool allowlist with the confined bash overriding the built-in
- * by name — with discovery, settings, and session files all off.
+ * launch from a package-owned definition — its model pin, its thinking
+ * pin, and its tool allowlist. The Implementer's confined bash overrides
+ * the built-in by name (prototype r45, finding 2); the Reviewers are
+ * read-oriented and carry no bash at all.
  */
-export interface ImplementerSpawnConfig {
-	/** The cycle's confined bash operations (confinement integration). */
-	operations: BashOperations;
-	/** Absolute path of the package-owned implementer definition. */
+interface DefinitionSpawnConfig {
+	/** The package-owned definition this factory builds sessions from. */
 	definitionPath: string;
 	/** Resolved once per Run and reused across cycles. */
 	modelRuntime?: ModelRuntime;
+	/** The cycle's confined bash operations; absent for read-only roles. */
+	operations?: BashOperations;
 }
 
-export function createImplementerSessionFactory(
-	config: ImplementerSpawnConfig,
+function createDefinitionSessionFactory(
+	config: DefinitionSpawnConfig,
 ): SessionFactory {
 	return async (request) => {
 		const {
@@ -232,20 +233,49 @@ export function createImplementerSessionFactory(
 			model,
 			thinkingLevel: (definition.thinking as "high" | undefined) ?? "high",
 			tools: definition.tools,
-			customTools: [
-				// The confined definition must override the built-in bash by
-				// name — "bash" has to stay in the allowlist (prototype r45,
-				// finding 2) or the session would run bash nowhere.
-				createBashToolDefinition(request.worktree, {
-					operations: config.operations,
-				}),
-			],
+			...(config.operations === undefined
+				? {}
+				: {
+						customTools: [
+							// The confined definition must override the built-in bash
+							// by name — "bash" has to stay in the allowlist (prototype
+							// r45, finding 2) or the session would run bash nowhere.
+							createBashToolDefinition(request.worktree, {
+								operations: config.operations,
+							}),
+						],
+					}),
 			settingsManager: SettingsManager.inMemory(),
 			sessionManager: SessionManager.inMemory(request.worktree),
 			resourceLoader,
 		});
 		return session;
 	};
+}
+
+/** The Implementer's factory: the confined-bash definition (ticket #62). */
+export function createImplementerSessionFactory(config: {
+	/** The cycle's confined bash operations (confinement integration). */
+	operations: BashOperations;
+	/** Absolute path of the package-owned implementer definition. */
+	definitionPath: string;
+	/** Resolved once per Run and reused across cycles. */
+	modelRuntime?: ModelRuntime;
+}): SessionFactory {
+	return createDefinitionSessionFactory(config);
+}
+
+/**
+ * A Reviewer's factory: the read-only definition, exactly as pinned —
+ * no bash, nothing to confine (ticket #63).
+ */
+export function createReviewerSessionFactory(config: {
+	/** Absolute path of the package-owned reviewer definition. */
+	definitionPath: string;
+	/** Resolved once per Run and reused across cycles. */
+	modelRuntime?: ModelRuntime;
+}): SessionFactory {
+	return createDefinitionSessionFactory(config);
 }
 
 /** The model type `ModelRuntime.getModel` resolves to. */
@@ -264,14 +294,14 @@ function resolvePinnedModel(
 	const provider = providerId?.trim();
 	const id = modelId?.trim();
 	if (provider === undefined || provider === "") {
-		throw new Error("implementer definition pins no provider");
+		throw new Error("the agent definition pins no provider");
 	}
 	if (id === undefined || id === "") {
-		throw new Error("implementer definition pins no model");
+		throw new Error("the agent definition pins no model");
 	}
 	const model = runtime.getModel(provider, id);
 	if (model === undefined) {
-		throw new Error(`pinned implementer model not found: ${provider}/${id}`);
+		throw new Error(`pinned agent model not found: ${provider}/${id}`);
 	}
 	return model;
 }

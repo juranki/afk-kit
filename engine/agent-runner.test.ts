@@ -15,7 +15,7 @@ import * as path from "node:path";
 import {
 	type AgentSessionLike,
 	parseAgentDefinition,
-	runImplementerSession,
+	runAgentSession,
 	type SessionFactory,
 } from "./agent-runner.ts";
 
@@ -68,7 +68,7 @@ function scriptedSession(): ScriptedSession {
 	return session;
 }
 
-describe("runImplementerSession", () => {
+describe("runAgentSession", () => {
 	test("prompts one fresh session once, completes, and persists the stream", async () => {
 		const dir = scratch();
 		const eventsPath = path.join(dir, "session-events.jsonl");
@@ -90,7 +90,7 @@ describe("runImplementerSession", () => {
 				return session;
 			},
 		];
-		const outcome = await runImplementerSession(
+		const outcome = await runAgentSession(
 			{
 				worktree: dir,
 				prompt: "Implement issue #9.",
@@ -148,7 +148,7 @@ describe("runImplementerSession", () => {
 				});
 			return session;
 		};
-		const outcome = await runImplementerSession(
+		const outcome = await runAgentSession(
 			{ worktree: dir, prompt: "p", eventsPath, capMs: 60_000 },
 			{ createSession: factory },
 		);
@@ -170,7 +170,7 @@ describe("runImplementerSession", () => {
 			};
 			return session;
 		};
-		const outcome = await runImplementerSession(
+		const outcome = await runAgentSession(
 			{
 				worktree: dir,
 				prompt: "p",
@@ -200,8 +200,8 @@ describe("runImplementerSession", () => {
 			eventsPath: path.join(dir, "e.jsonl"),
 			capMs: 60_000,
 		};
-		await runImplementerSession(request, { createSession: factory });
-		await runImplementerSession(
+		await runAgentSession(request, { createSession: factory });
+		await runAgentSession(
 			{ ...request, prompt: "cycle prompt, later cycle" },
 			{ createSession: factory },
 		);

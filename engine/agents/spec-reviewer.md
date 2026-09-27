@@ -1,5 +1,6 @@
 ---
 name: spec-reviewer
+provider: zai
 model: glm-5.3
 thinking: high
 tools: [read]
