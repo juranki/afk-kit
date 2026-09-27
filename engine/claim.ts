@@ -7,6 +7,12 @@
  * issue that is not claimable: one with an assignee, or a leftover
  * `in-progress` marker with no assignee (issue-lifecycle convention).
  *
+ * The worktree is an independent clone of the repository (ADR 0014, ticket
+ * afk-kit #62): all of its git state — objects, refs, index — lives inside
+ * the worktree, so a confined Implementer can commit without any write
+ * surface in the primary checkout's repository, and the claim's undo is a
+ * plain directory removal.
+ *
  * Failure at any step compensates the steps before it, in reverse order; a
  * compensation failure is named in the CLAIM_REFUSAL as leftover state.
  */
@@ -17,6 +23,12 @@ import type { GitResult } from "../extensions/coordinator/git.ts";
 import { projectFor, slugFor } from "../extensions/coordinator/slug.ts";
 import type { GhRunner } from "../extensions/readiness/gh.ts";
 import type { EngineSeams } from "./seams.ts";
+
+/** The authorship every Engine- and Implementer-side commit carries. */
+const ENGINE_IDENTITY = {
+	name: "AFK Engine",
+	email: "afk-engine@users.noreply.github.com",
+} as const;
 
 export type ClaimTicketOutcome =
 	| {
@@ -203,25 +215,44 @@ export async function claimTicket(
 				fs.mkdirSync(path.dirname(worktree), { recursive: true });
 				gitOk(
 					await seams.git(
-						["worktree", "add", "-b", branch, worktree, base],
+						[
+							"clone",
+							"--no-checkout",
+							"--no-hardlinks",
+							remote.stdout.trim(),
+							worktree,
+						],
 						seams.checkout,
 					),
-					`git worktree add ${worktree}`,
+					`git clone ${remote.stdout.trim()} ${worktree}`,
+				);
+				gitOk(
+					await seams.git(["checkout", "-b", branch, base], worktree),
+					`git checkout -b ${branch} ${base}`,
+				);
+				// The clone carries no host identity; the Engine pins its own
+				// so every Engine- and Implementer-side commit is deterministic
+				// and never inherits the maintainer's git configuration.
+				gitOk(
+					await seams.git(
+						["config", "user.name", ENGINE_IDENTITY.name],
+						worktree,
+					),
+					"git config user.name",
+				);
+				gitOk(
+					await seams.git(
+						["config", "user.email", ENGINE_IDENTITY.email],
+						worktree,
+					),
+					"git config user.email",
 				);
 			},
 			undo: async () => {
-				const removed = await seams.git(
-					["worktree", "remove", "--force", worktree],
-					seams.checkout,
-				);
-				if (removed.exitCode !== 0) {
-					await seams.git(["worktree", "prune"], seams.checkout);
-				}
-				const dropped = await seams.git(
-					["branch", "-D", branch],
-					seams.checkout,
-				);
-				if (dropped.exitCode !== 0) throw new Error(dropped.stderr.trim());
+				// The worktree is an independent clone: its branch and objects
+				// are entirely inside it, so removing the directory is the
+				// whole undo — the primary checkout's refs were never touched.
+				fs.rmSync(worktree, { recursive: true, force: true });
 				if (fs.existsSync(worktree)) {
 					throw new Error(`worktree ${worktree} still present`);
 				}
