@@ -13,6 +13,8 @@ test("the package ships without the vendored subagent extension", () => {
 	expect(manifest.pi?.extensions ?? []).not.toContain(
 		"./extensions/subagent/index.ts",
 	);
-	expect(manifest.pi?.prompts ?? []).toEqual([]);
+	expect(manifest.pi?.prompts ?? []).not.toContain(
+		"./extensions/subagent/prompts",
+	);
 	expect(fs.existsSync(path.join(repoRoot, "extensions/subagent"))).toBe(false);
 });

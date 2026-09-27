@@ -21,7 +21,7 @@ using the installed skills directly.
 | How afk-kit's own code is proven — test-first order, layers, toolchain | Conventions | [Code verify standard](conventions/code-verify.md) |
 | What happens on review findings, repeated failure, or a blocked ticket | Conventions | [Review and escalation](conventions/review-and-escalation.md) |
 | What a ready-for-agent issue must contain | Brief standard | [Agent brief template](brief-template.md) |
-| What the subagent mechanism must do (baseline for [ADR 0007](adr/0007-vendored-subagent-mechanism.md)) | Requirements | [Subagent mechanism](requirements/subagent-mechanism.md) |
+| What the retired subagent mechanism had to do (historical baseline for deprecated [ADR 0007](adr/0007-vendored-subagent-mechanism.md)) | Requirements | [Subagent mechanism](requirements/subagent-mechanism.md) |
 | How the coordinator session runs as shipped software — the playbook's runtime form | Skill | [`skills/coordinator/`](../skills/coordinator/SKILL.md) |
 | Where the engineering skills' per-repo configuration lives | Agent skills | [`docs/agents/`](agents/) |
 | Why a load-bearing choice was made | ADRs | [Decision index](adr/README.md) |
