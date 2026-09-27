@@ -278,14 +278,6 @@ interface RunDrivenOptions {
 	hangReviewer?: "standards" | "spec";
 	/** Per-Review cap override (tests); default 15 minutes. */
 	reviewCapMs?: number;
-	/** The scripted Implementer's final text; default the done report. */
-	report?: string;
-	/** Implementer behavior override; defaults to implementing the feature. */
-	implementerBehavior?: (
-		cycle: number,
-		worktree: string,
-		git: Awaited<ReturnType<typeof makeWorld>>["git"],
-	) => Promise<void>;
 }
 
 interface RunResult {
@@ -323,7 +315,6 @@ async function runDrivenWorld(
 		"Work complete.",
 		fencedJson({ status: "done", summary: "implemented" }),
 	].join("\n");
-	const finalReport = options.report ?? doneReport;
 
 	/** The scripted Implementer session the cycle port receives. */
 	const implementerFactory: SessionFactory = (request) => {
@@ -343,12 +334,8 @@ async function runDrivenWorld(
 					...baseRules(ISSUE, TITLE),
 				]);
 				const cycle = /Cycle: (\d+)/.exec(text)?.[1];
-				await (options.implementerBehavior ?? implementFeature)(
-					Number(cycle ?? 1),
-					request.worktree,
-					world.git,
-				);
-				finalText = finalReport;
+				await implementFeature(Number(cycle ?? 1), request.worktree, world.git);
+				finalText = doneReport;
 				listener?.({
 					type: "message_end",
 					message: {
