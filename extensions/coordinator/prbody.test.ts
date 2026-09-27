@@ -20,7 +20,7 @@ const BRIEF = parseBrief(
 		"",
 		"**Verify commands:**",
 		"- `bun install && bun run verify`",
-		"- `bash scripts/smoke-dispatch.sh`",
+		"- `bun test package.test.ts`",
 		"",
 		"**Blocked by:** none",
 		"**Blocks:** none",
@@ -44,7 +44,7 @@ describe("prBody", () => {
 	test("carries Closes, the criteria checklist, touched areas, and verify results, in order", () => {
 		const body = prBody(BRIEF, 101, [
 			{ command: "bun install && bun run verify", ok: true },
-			{ command: "bash scripts/smoke-dispatch.sh", ok: true },
+			{ command: "bun test package.test.ts", ok: true },
 		]);
 		const sections = body.split(/^## /m).map((s) => s.split("\n")[0]);
 		expect(sections).toEqual([
@@ -59,7 +59,7 @@ describe("prBody", () => {
 		);
 		expect(body).toContain("extensions/coordinator/");
 		expect(body).toContain("- `bun install && bun run verify` — pass");
-		expect(body).toContain("- `bash scripts/smoke-dispatch.sh` — pass");
+		expect(body).toContain("- `bun test package.test.ts` — pass");
 		// The brief's other fields do not leak into the body.
 		expect(body).not.toContain("Out of scope");
 		expect(body).not.toContain("Open questions");
