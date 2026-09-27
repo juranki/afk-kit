@@ -28,6 +28,7 @@ import {
 	runAgentSession,
 	type SessionFactory,
 } from "./agent-runner.ts";
+import type { Interruption } from "./drive.ts";
 import type { ReviewOutcome, ReviewPort } from "./ports.ts";
 import { buildSpecReviewPrompt, buildStandardsReviewPrompt } from "./prompt.ts";
 import { readRunEvents } from "./runs/events.ts";
@@ -57,6 +58,11 @@ interface ReviewPortPorts {
 	modelRuntime?: ModelRuntime;
 	/** Overrides for tests; the durable spec's cap is the default. */
 	reviewCapMs?: number;
+	/**
+	 * The Run's interruption seam (ticket #65): when given, an interrupt
+	 * aborts both in-flight Reviewer sessions.
+	 */
+	interruption?: Interruption;
 }
 
 export interface ReviewPortDeps {
@@ -223,7 +229,10 @@ export function createReviewPort(deps: ReviewPortDeps): ReviewPort {
 				eventsPath: path.join(sideDir, "session-events.jsonl"),
 				capMs: ports.reviewCapMs ?? REVIEW_CAP_MS,
 			},
-			{ createSession: factoryFor(role) },
+			{
+				createSession: factoryFor(role),
+				interruption: ports.interruption,
+			},
 		);
 		const durationMs = Date.now() - startedMs;
 

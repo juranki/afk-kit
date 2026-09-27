@@ -15,11 +15,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { slugFor } from "../extensions/coordinator/slug.ts";
 import { createCyclePort, priorFeedback } from "./cycle.ts";
-import { driveRun } from "./drive.ts";
+import { createInterruption, driveRun } from "./drive.ts";
 import type { ReviewOutcome } from "./ports.ts";
-import { type RunEvent, readRunEvents } from "./runs/events.ts";
+import {
+	RUN_EVENT_NAMES,
+	type RunEvent,
+	readRunEvents,
+} from "./runs/events.ts";
 import { foldRunEvents } from "./runs/projection.ts";
-import { createRun, type RunHandle } from "./runs/store.ts";
+import { createRun, type RunHandle, recordEvent } from "./runs/store.ts";
 import {
 	baseRules,
 	cleanupWorld,
@@ -219,6 +223,7 @@ function scriptedSessionFactory(
 		let listener: ((event: unknown) => void) | null = null;
 		let finalText = "";
 		let resolvePrompt: (() => void) | null = null;
+		let abortRequested = false;
 		return {
 			subscribe: (l: (event: unknown) => void) => {
 				listener = l;
@@ -232,6 +237,7 @@ function scriptedSessionFactory(
 				listener?.({ type: "agent_start" });
 				if (options.hang === true) {
 					// The SDK contract: abort() resolves the pending prompt.
+					if (abortRequested) return;
 					await new Promise<void>((resolve) => {
 						resolvePrompt = resolve;
 					});
@@ -249,6 +255,7 @@ function scriptedSessionFactory(
 				listener?.({ type: "agent_end" });
 			},
 			abort: async () => {
+				abortRequested = true;
 				resolvePrompt?.();
 			},
 			dispose: () => {},
@@ -842,5 +849,72 @@ describe("createCyclePort: the Review gate's findings route into the next fresh 
 		const summary = foldRunEvents(result.events);
 		expect(summary?.outcome).toBe("handed-over-to-maintainer");
 		expect(summary?.cycle).toBe(2);
+	});
+});
+
+describe("the cycle port aborts its in-flight session on interruption (#65)", () => {
+	function until(condition: () => boolean, what: string): Promise<void> {
+		return (async () => {
+			const budget = Date.now() + 5_000;
+			while (!condition()) {
+				if (Date.now() > budget) {
+					throw new Error(`timed out waiting for ${what}`);
+				}
+				await Bun.sleep(2);
+			}
+		})();
+	}
+
+	test("requesting the interruption aborts the hung session and settles the cycle", async () => {
+		const started = await startWorld();
+		try {
+			// The claim facts and a worktree whose HEAD resolves — the drive
+			// would have recorded and created them before Cycle 1.
+			recordEvent(started.handle, {
+				name: RUN_EVENT_NAMES.context,
+				payload: { branch: BRANCH, worktree: started.worktree },
+			});
+			fs.mkdirSync(started.worktree, { recursive: true });
+			await started.world.git(
+				["init", "--initial-branch=main", "."],
+				started.worktree,
+			);
+			await started.world.git(
+				["config", "user.email", "t@example.com"],
+				started.worktree,
+			);
+			await started.world.git(["config", "user.name", "T"], started.worktree);
+			fs.writeFileSync(path.join(started.worktree, "seed.txt"), "seed\n");
+			await started.world.git(["add", "-A"], started.worktree);
+			await started.world.git(["commit", "-m", "seed"], started.worktree);
+
+			const interruption = createInterruption();
+			const port = createCyclePort({
+				handle: started.handle,
+				seams: started.world.seams,
+				brief: BRIEF_BODY,
+				ports: {
+					sessionFactory: scriptedSessionFactory(started, { hang: true }),
+					confinementRuntime: fakeRuntime().port,
+					interruption,
+				},
+			});
+			const outcome = port(1); // hangs until the session aborts
+			await until(
+				() => started.launched.length === 1,
+				"the implementer session to launch",
+			);
+			interruption.request("interrupted by SIGINT");
+			const settled = await outcome;
+			// The aborted session is the honest judged failure the driver
+			// already knows how to treat; the interruption itself decides
+			// the Run's fate.
+			expect(settled.status).toBe("failed");
+			if (settled.status === "failed") {
+				expect(settled.reason).toContain("did not complete");
+			}
+		} finally {
+			await cleanupWorld(started.world);
+		}
 	});
 });

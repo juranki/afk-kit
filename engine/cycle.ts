@@ -21,9 +21,9 @@ import { verifyCommandList } from "../extensions/readiness/check.ts";
 import {
 	createImplementerSessionFactory,
 	runAgentSession,
-	type SessionFactory,
 } from "./agent-runner.ts";
 import { createTaskConfinement } from "./confinement.ts";
+import type { Interruption } from "./drive.ts";
 import type { CycleOutcome, CyclePort } from "./ports.ts";
 import type { ConfinementRuntimePort } from "./preflight.ts";
 import {
@@ -57,6 +57,11 @@ interface CyclePortPorts {
 	/** Overrides for tests; the durable spec's caps are the defaults. */
 	implementerCapMs?: number;
 	verifyCapMs?: number;
+	/**
+	 * The Run's interruption seam (ticket #65): when given, an interrupt
+	 * aborts this cycle's in-flight Implementer session.
+	 */
+	interruption?: Interruption;
 }
 
 export interface CyclePortDeps {
@@ -234,7 +239,10 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 					eventsPath: path.join(implementerDir, "session-events.jsonl"),
 					capMs: ports.implementerCapMs ?? IMPLEMENTER_CAP_MS,
 				},
-				{ createSession: sessionFactory },
+				{
+					createSession: sessionFactory,
+					interruption: ports.interruption,
+				},
 			);
 
 			// Observed facts: the report's prose cannot override these.
