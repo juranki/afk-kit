@@ -10,6 +10,8 @@
 import { describe, expect, test } from "bun:test";
 import {
 	buildImplementerPrompt,
+	buildSpecReviewPrompt,
+	buildStandardsReviewPrompt,
 	parseImplementerResult,
 	requireDone,
 } from "./prompt.ts";
@@ -181,5 +183,95 @@ describe("buildImplementerPrompt", () => {
 	test("cycle 1 never carries a feedback section", () => {
 		const prompt = buildImplementerPrompt(facts);
 		expect(prompt).not.toMatch(/previous cycle/i);
+	});
+});
+
+describe("buildReviewerPrompt: the Standards Reviewer", () => {
+	const facts = {
+		issue: 63,
+		cycle: 1,
+		branch: "issue-63-gate",
+		worktree: "/wt/repo/issue-63-gate",
+		diffPath: "/run/cycle-1/reviews/diff.patch",
+	};
+
+	test("pins the role, the worktree, and the pushed diff to read", () => {
+		const prompt = buildStandardsReviewPrompt(facts);
+		expect(prompt).toContain("Standards Reviewer");
+		expect(prompt).toContain("#63");
+		expect(prompt).toContain("/wt/repo/issue-63-gate");
+		expect(prompt).toContain("/run/cycle-1/reviews/diff.patch");
+		expect(prompt).toContain("main...HEAD");
+	});
+
+	test("demands the verdict contract with the three labels", () => {
+		const prompt = buildStandardsReviewPrompt(facts);
+		expect(prompt).toContain("approve");
+		expect(prompt).toContain("request-changes");
+		expect(prompt).toContain("escalate");
+		expect(prompt).toContain("blocker");
+		expect(prompt).toContain("major");
+		expect(prompt).toContain("minor");
+	});
+
+	test("demands the engine-verified consulted list on the sha256 recipe", () => {
+		const prompt = buildStandardsReviewPrompt(facts);
+		expect(prompt).toContain("standardsConsulted");
+		expect(prompt.toLowerCase()).toContain("sha256");
+		expect(prompt).toContain("AGENTS.md");
+	});
+
+	test("holds the review to read-only judgment", () => {
+		const prompt = buildStandardsReviewPrompt(facts);
+		expect(prompt.toLowerCase()).toContain("read-only");
+		expect(prompt).toMatch(/never modify/i);
+	});
+
+	test("leaves ticket-match judgment to the spec reviewer", () => {
+		const prompt = buildStandardsReviewPrompt(facts);
+		expect(prompt.toLowerCase()).toContain("spec reviewer");
+	});
+});
+
+describe("buildSpecReviewPrompt: the Spec Reviewer", () => {
+	const facts = {
+		issue: 63,
+		cycle: 2,
+		branch: "issue-63-gate",
+		worktree: "/wt/repo/issue-63-gate",
+		diffPath: "/run/cycle-2/reviews/diff.patch",
+		brief:
+			"**Summary:** Gate a candidate.\n\n**Acceptance criteria:**\n- [ ] Dual approval gates the handoff.",
+	};
+
+	test("pins the role, the worktree, and the pushed diff to read", () => {
+		const prompt = buildSpecReviewPrompt(facts);
+		expect(prompt).toContain("Spec Reviewer");
+		expect(prompt).toContain("#63");
+		expect(prompt).toContain("/wt/repo/issue-63-gate");
+		expect(prompt).toContain("/run/cycle-2/reviews/diff.patch");
+		expect(prompt).toContain("main...HEAD");
+	});
+
+	test("carries the immutable brief verbatim", () => {
+		const prompt = buildSpecReviewPrompt(facts);
+		expect(prompt).toContain(
+			"**Summary:** Gate a candidate.\n\n**Acceptance criteria:**\n- [ ] Dual approval gates the handoff.",
+		);
+	});
+
+	test("judges every acceptance criterion and the out-of-scope line", () => {
+		const prompt = buildSpecReviewPrompt(facts);
+		expect(prompt).toContain("acceptance criterion");
+		expect(prompt).toContain("out-of-scope");
+		expect(prompt).toMatch(/the brief is the contract/i);
+	});
+
+	test("demands the verdict contract without a consulted list", () => {
+		const prompt = buildSpecReviewPrompt(facts);
+		expect(prompt).toContain("approve");
+		expect(prompt).toContain("request-changes");
+		expect(prompt).toContain("escalate");
+		expect(prompt).not.toContain("standardsConsulted");
 	});
 });
