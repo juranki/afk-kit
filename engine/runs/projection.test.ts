@@ -93,6 +93,27 @@ describe("foldRunEvents", () => {
 		expect(summary?.cycle).toBe(2);
 	});
 
+	test("carries the implementation skills' preflight records", () => {
+		const skills = [
+			{ name: "implement", path: "/skills/implement/SKILL.md", sha256: "aa" },
+			{ name: "tdd", path: "/skills/tdd/SKILL.md", sha256: "bb" },
+		];
+		const summary = foldRunEvents([
+			event({
+				name: RUN_EVENT_NAMES.implementationSkills,
+				payload: { skills },
+			}),
+		]);
+		expect(summary?.implementationSkills).toEqual(skills);
+	});
+
+	test("a run without implementation-skills evidence folds to null", () => {
+		const summary = foldRunEvents([
+			event({ name: RUN_EVENT_NAMES.started, payload: {} }),
+		]);
+		expect(summary?.implementationSkills).toBeNull();
+	});
+
 	test("records the terminal outcome", () => {
 		const summary = foldRunEvents([
 			event({

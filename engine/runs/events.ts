@@ -26,6 +26,11 @@ export const RUN_EVENT_NAMES = {
 	started: "run.started",
 	/** Run-scoped facts became known; payload: `{ pr?, branch?, worktree? }`. */
 	context: "run.context",
+	/**
+	 * The pinned implementation skills resolved at preflight (ADR 0015);
+	 * payload: `{ skills: ImplementationSkill[] }`.
+	 */
+	implementationSkills: "run.implementation-skills",
 	/** A diagnostic that changes no state; payload: `{ message }`. */
 	notice: "run.notice",
 	/** The Run entered a stage; payload: `{ stage }`. */
@@ -42,6 +47,16 @@ export const RUN_EVENT_NAMES = {
 
 /** Terminal outcomes of a Run (durable spec #46). */
 export type RunOutcome = "refused" | "escalated" | "handed-over-to-maintainer";
+
+/** One pinned implementation skill's preflight record (ADR 0015, #75). */
+export interface ImplementationSkill {
+	/** The pinned skill name. */
+	name: string;
+	/** Absolute path of the installed `SKILL.md`. */
+	path: string;
+	/** Sha256 hex of the `SKILL.md` bytes at preflight. */
+	sha256: string;
+}
 /** One event envelope. `name` may be any string; payloads are typed per name. */
 export interface RunEvent {
 	/** Envelope schema version. */

@@ -10,6 +10,7 @@
  * package-owned definition (real SDK dispatch is L3, the proof run is L4).
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -18,6 +19,7 @@ import type {
 	ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import type { Interruption } from "./drive.ts";
+import type { ImplementationSkill } from "./runs/events.ts";
 
 /**
  * How long an aborted session may keep settling and flushing after the
@@ -163,8 +165,19 @@ export interface AgentDefinition {
 	model?: string;
 	thinking?: string;
 	tools: string[];
+	/** The installed skills this session mounts (ADR 0015); none by default. */
+	skills: string[];
 	/** The prompt body, frontmatter stripped. */
 	body: string;
+}
+
+/** Parse a bracketed comma-separated frontmatter list pin: `[a, b]`. */
+function parseListPin(value: string): string[] {
+	const inner = value.replace(/^\[/, "").replace(/\]$/, "");
+	return inner
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry !== "");
 }
 
 /**
@@ -175,9 +188,9 @@ export interface AgentDefinition {
 export function parseAgentDefinition(text: string): AgentDefinition {
 	const match = /^---\n([\s\S]*?)\n---\n?/.exec(text);
 	if (match === null) {
-		return { tools: [], body: text };
+		return { tools: [], skills: [], body: text };
 	}
-	const definition: AgentDefinition = { tools: [] };
+	const definition: AgentDefinition = { tools: [], skills: [] };
 	for (const line of (match[1] ?? "").split("\n")) {
 		const entry = /^(\w[\w-]*):\s*(.*)$/.exec(line);
 		if (entry === null) continue;
@@ -188,11 +201,9 @@ export function parseAgentDefinition(text: string): AgentDefinition {
 		else if (key === "model") definition.model = value;
 		else if (key === "thinking") definition.thinking = value;
 		else if (key === "tools") {
-			const inner = value.replace(/^\[/, "").replace(/\]$/, "");
-			definition.tools = inner
-				.split(",")
-				.map((tool) => tool.trim())
-				.filter((tool) => tool !== "");
+			definition.tools = parseListPin(value);
+		} else if (key === "skills") {
+			definition.skills = parseListPin(value);
 		}
 	}
 	definition.body = text.slice((match[0] ?? "").length);
@@ -200,15 +211,64 @@ export function parseAgentDefinition(text: string): AgentDefinition {
 }
 
 /**
+ * Resolve the paths a session mounts for its definition's `skills:` pin
+ * (ADR 0015): each pinned name must have a preflight record, the recorded
+ * `SKILL.md` must still be readable, and its bytes must still hash to the
+ * preflight-recorded SHA-256 — a hash mismatch is a loud error, never a
+ * fallback onto drifted text. A definition with no pin mounts nothing.
+ */
+export function resolveMountedSkillPaths(
+	skills: readonly string[],
+	records: readonly ImplementationSkill[] | undefined,
+): string[] {
+	if (skills.length === 0) return [];
+	if (records === undefined) {
+		throw new Error(
+			`the definition pins implementation skills (${skills.join(", ")}) but the Run records no preflight resolution — refusing to spawn with unpinned text`,
+		);
+	}
+	return skills.map((name) => {
+		const record = records.find((r) => r.name === name);
+		if (record === undefined) {
+			throw new Error(
+				`pinned implementation skill has no preflight record: ${name}`,
+			);
+		}
+		let actual: string;
+		try {
+			actual = createHash("sha256")
+				.update(fs.readFileSync(record.path))
+				.digest("hex");
+		} catch (error) {
+			throw new Error(
+				`pinned implementation skill not readable: ${name} (${record.path}): ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		if (actual !== record.sha256) {
+			throw new Error(
+				`pinned implementation skill changed since preflight: ${name} (preflight ${record.sha256}, now ${actual}) — refusing to spawn with drifted text`,
+			);
+		}
+		return record.path;
+	});
+}
+
+/**
  * The production session factory (L3): builds one fresh SDK session per
  * launch from a package-owned definition — its model pin, its thinking
- * pin, and its tool allowlist. The Implementer's confined bash overrides
+ * pin, its tool allowlist, and its skills pin mounted against the
+ * preflight records (ADR 0015). The Implementer's confined bash overrides
  * the built-in by name (prototype r45, finding 2); the Reviewers are
  * read-oriented and carry no bash at all.
  */
 interface DefinitionSpawnConfig {
 	/** The package-owned definition this factory builds sessions from. */
 	definitionPath: string;
+	/**
+	 * The implementation skills preflight resolved for this Run (ADR 0015);
+	 * required when the definition carries a `skills:` pin.
+	 */
+	pinnedSkills?: readonly ImplementationSkill[];
 	/** Resolved once per Run and reused across cycles. */
 	modelRuntime?: ModelRuntime;
 	/** The cycle's confined bash operations; absent for read-only roles. */
@@ -243,6 +303,12 @@ function createDefinitionSessionFactory(
 			systemPrompt: definition.body,
 			noExtensions: true,
 			noSkills: true,
+			// The pinned skills are the only skills present (ADR 0015):
+			// discovery stays off, nothing ambient leaks in.
+			additionalSkillPaths: resolveMountedSkillPaths(
+				definition.skills,
+				config.pinnedSkills,
+			),
 			noPromptTemplates: true,
 			noThemes: true,
 			noContextFiles: true,
@@ -278,6 +344,11 @@ export function createImplementerSessionFactory(config: {
 	operations: BashOperations;
 	/** Absolute path of the package-owned implementer definition. */
 	definitionPath: string;
+	/**
+	 * The implementation skills preflight resolved for this Run, from the
+	 * Run's evidence (ADR 0015, ticket #75).
+	 */
+	pinnedSkills?: readonly ImplementationSkill[];
 	/** Resolved once per Run and reused across cycles. */
 	modelRuntime?: ModelRuntime;
 }): SessionFactory {

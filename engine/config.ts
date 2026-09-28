@@ -7,8 +7,10 @@
  * paths — no discovery, shadowing, or runtime override.
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ImplementationSkill } from "./runs/events.ts";
 
 /** The pinned implementer model (durable spec #46, ADR 0004). */
 const IMPLEMENTER_MODEL = "glm-5.3-flash";
@@ -18,6 +20,18 @@ const REVIEWER_MODEL = "glm-5.3";
 
 /** Executables a start requires on PATH. */
 const PINNED_EXECUTABLES = ["git", "gh", "bun"] as const;
+
+/**
+ * The installed implementation skills an Implementer session mounts (ADR
+ * 0015, ticket #75). The pin lives with the engine configuration and the
+ * flash-first model pins (ADR 0004); preflight validates it beside the
+ * agent definitions, as the named `implementation-skills` check.
+ */
+export const IMPLEMENTATION_SKILLS = [
+	"implement",
+	"tdd",
+	"codebase-design",
+] as const;
 
 /** One package-owned agent definition, loaded by exact package path. */
 interface AgentDefinitionPin {
@@ -42,6 +56,11 @@ const AGENT_DEFINITIONS: readonly AgentDefinitionPin[] = [
 export interface ConfigPorts {
 	/** Directory holding the pinned agent definitions. */
 	definitionsRoot?: string;
+	/**
+	 * Directory holding the installed skills (defaults to the SDK's own
+	 * agent directory — the same set an attended session discovers).
+	 */
+	skillsRoot?: string;
 	/** The PATH to scan for executables (defaults to the process PATH). */
 	pathEnv?: string;
 	/** The SDK import to attempt (defaults to the pi coding agent package). */
@@ -71,6 +90,87 @@ function defaultSdkImport(): Promise<unknown> {
 export interface ConfigValidation {
 	ok: boolean;
 	problems: string[];
+}
+
+/** Result of resolving the implementation skills pin. */
+export interface ImplementationSkillsValidation {
+	ok: boolean;
+	problems: string[];
+	/** The resolved records, in pin order; partial when not ok. */
+	skills: ImplementationSkill[];
+}
+
+/**
+ * The skills root the resolution consults: the injected root, or the SDK's
+ * own agent directory — the engine sees exactly what an attended session
+ * sees (ADR 0015). A missing SDK export is a reportable problem, not a
+ * throw.
+ */
+async function defaultSkillsRoot(
+	ports: ConfigPorts,
+): Promise<{ root?: string; problem?: string }> {
+	try {
+		const sdk = (await (ports.sdkImport ?? defaultSdkImport)()) as {
+			getAgentDir?: unknown;
+		};
+		if (typeof sdk.getAgentDir !== "function") {
+			return {
+				problem: "the SDK module exports no agent directory (getAgentDir)",
+			};
+		}
+		return {
+			root: path.join((sdk.getAgentDir as () => string)(), "skills"),
+		};
+	} catch (error) {
+		return {
+			problem: `SDK module not importable: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
+/**
+ * Resolve the implementation skills pin (ADR 0015): every pinned name must
+ * resolve to a non-empty installed `SKILL.md` under the skills root, and
+ * each resolution records the file's SHA-256 — the evidence of the precise
+ * text the Implementer session will be given. Names every failure; never
+ * throws.
+ */
+export async function resolveImplementationSkills(
+	ports: ConfigPorts = {},
+): Promise<ImplementationSkillsValidation> {
+	const problems: string[] = [];
+	const skills: ImplementationSkill[] = [];
+	let root = ports.skillsRoot;
+	if (root === undefined) {
+		const defaulted = await defaultSkillsRoot(ports);
+		if (defaulted.problem !== undefined) {
+			problems.push(defaulted.problem);
+			return { ok: false, problems, skills };
+		}
+		root = defaulted.root;
+	}
+	for (const name of IMPLEMENTATION_SKILLS) {
+		const file = path.join(root, name, "SKILL.md");
+		let body: Buffer;
+		try {
+			body = fs.readFileSync(file);
+		} catch {
+			problems.push(
+				`implementation skill not installed: ${name} (no SKILL.md at ${file})`,
+			);
+			continue;
+		}
+		if (body.length === 0) {
+			problems.push(`implementation skill is empty: ${name} (${file})`);
+			continue;
+		}
+		skills.push({
+			name,
+			path: file,
+			sha256: createHash("sha256").update(body).digest("hex"),
+		});
+	}
+	return { ok: problems.length === 0, problems, skills };
 }
 
 /**
