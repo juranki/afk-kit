@@ -36,11 +36,16 @@ Do not silently resolve a material conflict. Ask, or record the decision as an A
 
 ## Git
 
-The canonical remote is `github.com/juranki/afk-kit`. Until the coordinator loop is
-minimally viable (map issue
-[#5](https://github.com/juranki/afk-kit/issues/5)), changes commit directly to
-`main`; after that, this repository is dogfooded through the branch-per-issue and
-review-before-merge discipline the toolkit itself prescribes.
+The canonical remote is `github.com/juranki/afk-kit`. Every change lands through the
+branch-per-issue and review-before-merge discipline the toolkit itself prescribes:
+branch `issue-<n>-<slug>` per the [branching and PRs
+convention](docs/conventions/branching-and-prs.md) (docs-only changes: a short slug
+branch), a reviewed pull request, and only the maintainer merges. Branch protection
+on `main` enforces this mechanically (the guard-rail stack, issue
+[#42](https://github.com/juranki/afk-kit/issues/42)) — it arrived before the
+coordinator loop's minimal viability (map issue
+[#5](https://github.com/juranki/afk-kit/issues/5)), so the earlier
+direct-to-`main` allowance no longer exists.
 
 ## Agent skills
 
