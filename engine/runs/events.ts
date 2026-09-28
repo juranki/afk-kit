@@ -57,6 +57,7 @@ export interface ImplementationSkill {
 	/** Sha256 hex of the `SKILL.md` bytes at preflight. */
 	sha256: string;
 }
+
 /** One event envelope. `name` may be any string; payloads are typed per name. */
 export interface RunEvent {
 	/** Envelope schema version. */
