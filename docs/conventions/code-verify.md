@@ -11,8 +11,12 @@ briefs; this standard governs afk-kit's own tickets. The
 
 Implementation on afk-kit tickets is test-first: the change starts with the
 failing test that pins the new behaviour or bug, then the code that makes it
-pass (the installed `tdd` skill runs the loop). The layers below govern what
-must be proven; this rule governs the order it is written in.
+pass. The installed `tdd` skill runs the loop — attended sessions read it
+from the installed skill set; the engine's Implementer sessions run the same
+installed skills mounted at the spawn seam ([ADR
+0015](../adr/0015-unattended-implementation-runs-the-installed-implementation-skills.md)).
+The layers below govern what must be proven; this rule governs the order it
+is written in.
 
 ## The four layers
 
