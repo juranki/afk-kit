@@ -16,11 +16,15 @@ import * as path from "node:path";
 import { slugFor } from "../extensions/coordinator/slug.ts";
 import type { SessionFactory } from "./agent-runner.ts";
 import { createCyclePort } from "./cycle.ts";
-import { driveRun } from "./drive.ts";
+import { createInterruption, driveRun } from "./drive.ts";
 import { createReviewPort } from "./review.ts";
-import { type RunEvent, readRunEvents } from "./runs/events.ts";
+import {
+	RUN_EVENT_NAMES,
+	type RunEvent,
+	readRunEvents,
+} from "./runs/events.ts";
 import { foldRunEvents } from "./runs/projection.ts";
-import { createRun, type RunHandle } from "./runs/store.ts";
+import { createRun, type RunHandle, recordEvent } from "./runs/store.ts";
 import {
 	baseRules,
 	cleanupWorld,
@@ -198,6 +202,7 @@ function scriptedReviewers(
 			let listener: ((event: unknown) => void) | null = null;
 			let resolvePrompt: (() => void) | null = null;
 			let finalText = "";
+			let abortRequested = false;
 			return {
 				subscribe: (l: (event: unknown) => void) => {
 					listener = l;
@@ -210,6 +215,7 @@ function scriptedReviewers(
 					if (role === "standards") await specStarted;
 					if (options.hang === role) {
 						// The SDK contract: abort() resolves the pending prompt.
+						if (abortRequested) return;
 						await new Promise<void>((resolve) => {
 							resolvePrompt = resolve;
 						});
@@ -226,6 +232,7 @@ function scriptedReviewers(
 					listener?.({ type: "agent_end" });
 				},
 				abort: async () => {
+					abortRequested = true;
 					resolvePrompt?.();
 				},
 				dispose: () => {},
@@ -683,5 +690,61 @@ describe("createReviewPort: the gate refuses", () => {
 			),
 		) as { status: string };
 		expect(second.status).toBe("approved");
+	});
+});
+
+describe("createReviewPort: the interruption aborts both Reviewers (#65)", () => {
+	test("requesting the interruption aborts the hung Reviewer and settles the round", async () => {
+		const world = await makeWorld(ISSUE, TITLE, [...escalationRules()]);
+		try {
+			const handle = createRun({
+				stateRoot: path.join(world.root, "state"),
+				owner: "test",
+				repo: "repo",
+				ticket: ISSUE,
+				brief: BRIEF_BODY,
+			});
+			const worktree = path.join(world.worktreeRoot, "remote", BRANCH);
+			// The claim facts and a worktree whose main...HEAD resolves — the
+			// drive would have recorded and created them before the Reviews.
+			recordEvent(handle, {
+				name: RUN_EVENT_NAMES.context,
+				payload: { branch: BRANCH, worktree },
+			});
+			fs.mkdirSync(worktree, { recursive: true });
+			await world.git(["init", "--initial-branch=main", "."], worktree);
+			await world.git(["config", "user.email", "t@example.com"], worktree);
+			await world.git(["config", "user.name", "T"], worktree);
+			fs.writeFileSync(path.join(worktree, "candidate.txt"), "x\n");
+			await world.git(["add", "-A"], worktree);
+			await world.git(["commit", "-m", "candidate"], worktree);
+
+			const reviewers = scriptedReviewers(
+				(role, wt) =>
+					role === "standards" ? approveStandards(wt) : approveSpec(),
+				{ hang: "standards" },
+			);
+			const interruption = createInterruption();
+			const port = createReviewPort({
+				handle,
+				seams: world.seams,
+				brief: BRIEF_BODY,
+				ports: {
+					standardsFactory: reviewers.standardsFactory,
+					specFactory: reviewers.specFactory,
+					interruption,
+				},
+			});
+			const outcome = port(1); // hangs until the standards session aborts
+			await reviewers.specStarted;
+			interruption.request("interrupted by SIGINT");
+			const settled = await outcome;
+			expect(settled.status).toBe("changes-requested");
+			if (settled.status === "changes-requested") {
+				expect(settled.reason).toContain("did not complete");
+			}
+		} finally {
+			await cleanupWorld(world);
+		}
 	});
 });

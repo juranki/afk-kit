@@ -144,6 +144,76 @@ describe("escalateRun", () => {
 		}
 	});
 
+	test("the tracker already carrying this Run's escalation comment skips the post (ticket #65)", async () => {
+		const world = await makeWorld(
+			ISSUE,
+			TITLE,
+			escalationRules([
+				{
+					args: ["issue", "view", String(ISSUE), "--json", "comments"],
+					json: {
+						comments: [
+							{
+								body: `ESCALATION: Run ${RUN} on #${ISSUE} stopped at implement, cycle 2: posted before the crash.`,
+							},
+							{ body: "an unrelated maintainer comment" },
+						],
+					},
+				},
+			]),
+		);
+		try {
+			const outcome = await escalateRun(facts(), world.seams);
+			expect(outcome.status).toBe("escalated");
+			// No second comment: reconciliation must never duplicate one.
+			expect(world.argvLog().some((c) => c.startsWith("issue comment"))).toBe(
+				false,
+			);
+			// The label corrections still happen.
+			const calls = world.argvLog();
+			expect(
+				calls.some(
+					(c) => c.includes("--add-label") && c.includes("needs-info"),
+				),
+			).toBe(true);
+			expect(
+				calls.some(
+					(c) => c.includes("--remove-label") && c.includes("in-progress"),
+				),
+			).toBe(true);
+		} finally {
+			cleanupWorld(world);
+		}
+	});
+
+	test("another Run's escalation comment does not suppress this Run's post", async () => {
+		const world = await makeWorld(
+			ISSUE,
+			TITLE,
+			escalationRules([
+				{
+					args: ["issue", "view", String(ISSUE), "--json", "comments"],
+					json: {
+						comments: [
+							{
+								body: `ESCALATION: Run 20260101T000000Z-other on #${ISSUE} stopped at handoff: older Run.`,
+							},
+						],
+					},
+				},
+			]),
+		);
+		try {
+			const outcome = await escalateRun(facts(), world.seams);
+			expect(outcome.status).toBe("escalated");
+			expect(world.argvLog().some((c) => c.startsWith("issue comment"))).toBe(
+				true,
+			);
+		} finally {
+			cleanupWorld(world);
+		}
+	});
+
 	test("a failed needs-info step reports ESCALATION_FAILURE but still removes the workflow labels", async () => {
 		const world = await makeWorld(
 			ISSUE,

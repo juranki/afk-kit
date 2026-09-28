@@ -17,6 +17,7 @@ import type {
 	BashOperations,
 	ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import type { Interruption } from "./drive.ts";
 
 /**
  * How long an aborted session may keep settling and flushing after the
@@ -54,7 +55,7 @@ export type SessionFactory = (
 ) => Promise<AgentSessionLike>;
 
 export interface AgentSpawnOutcome {
-	/** `"aborted"` when the cap fired; `"completed"` on a normal finish. */
+	/** `"aborted"` when the cap fired or the Run was interrupted; `"completed"` on a normal finish. */
 	stop: "completed" | "aborted";
 	/** The final assistant text; empty on an aborted run. */
 	resultText: string;
@@ -62,6 +63,12 @@ export interface AgentSpawnOutcome {
 
 export interface AgentRunnerPorts {
 	createSession?: SessionFactory;
+	/**
+	 * The Run's interruption seam (ticket #65): when given, an interrupt
+	 * aborts this launch — the outcome reports `aborted`, so the judged
+	 * evidence stays honest about why the session did not finish.
+	 */
+	interruption?: Interruption;
 }
 
 function appendEvent(eventsPath: string, event: unknown): void {
@@ -84,6 +91,7 @@ export async function runAgentSession(
 	ports: AgentRunnerPorts = {},
 ): Promise<AgentSpawnOutcome> {
 	const createSession = ports.createSession;
+	const interruption = ports.interruption;
 	if (createSession === undefined) {
 		throw new Error(
 			"no session factory configured — the Engine never spawns an unconfigured session",
@@ -96,9 +104,17 @@ export async function runAgentSession(
 
 	const session = await createSession(request);
 	let capFired = false;
+	let interrupted = false;
 	let settleCapFired = false;
 	const unsubscribe = session.subscribe((event) => {
 		appendEvent(request.eventsPath, event);
+	});
+
+	// The Run's interruption aborts this launch exactly like the wall-clock
+	// cap does — and the outcome says so (ticket #65).
+	const offInterrupt = interruption?.onRequest(() => {
+		interrupted = true;
+		void session.abort();
 	});
 
 	const promptPromise = session.prompt(request.prompt);
@@ -111,7 +127,7 @@ export async function runAgentSession(
 			promptPromise,
 			new Promise<never>((_, reject) => {
 				setTimeout(() => {
-					if (capFired) {
+					if (capFired || interrupted) {
 						settleCapFired = true;
 						reject(
 							new Error("aborted session did not settle within 30 seconds"),
@@ -123,6 +139,7 @@ export async function runAgentSession(
 	} finally {
 		clearTimeout(timer);
 		unsubscribe();
+		offInterrupt?.();
 		try {
 			await session.dispose();
 		} catch {
@@ -130,9 +147,11 @@ export async function runAgentSession(
 		}
 	}
 	return {
-		stop: capFired ? "aborted" : "completed",
+		stop: capFired || interrupted ? "aborted" : "completed",
 		resultText:
-			capFired || settleCapFired ? "" : session.getLastAssistantText(),
+			capFired || interrupted || settleCapFired
+				? ""
+				: session.getLastAssistantText(),
 	};
 }
 

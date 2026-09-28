@@ -14,6 +14,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { type GitRunner, runGit } from "../extensions/coordinator/git.ts";
 import {
@@ -38,6 +39,7 @@ import {
 	repositoryStateRoot,
 } from "./runs/paths.ts";
 import { foldRunEvents } from "./runs/projection.ts";
+import { finalizeInterruptedRun } from "./runs/reconcile.ts";
 import { resolveRepository } from "./runs/status.ts";
 import {
 	acquireRunLock,
@@ -236,12 +238,25 @@ async function gatherStartFacts(options: {
 		priorDirs = null;
 	}
 	if (priorDirs !== null) {
+		// The interruption reconciler (ticket #65): a dead-lock Run is
+		// finalized first — its interruption Escalation materialized and
+		// the Run made terminal — so the next implement converges the
+		// interruption instead of tripping over it. A live Run and a
+		// lock-less unfinished Run are untouched and still block.
+		const reconcileSeams = {
+			gh,
+			git,
+			checkout: cwd,
+			worktreeRoot: path.join(os.homedir(), "wt"),
+		};
 		const uncleared: string[] = [];
 		for (const entry of priorDirs) {
 			if (!entry.isDirectory()) continue;
+			const runDir = path.join(runsDir, entry.name);
+			await finalizeInterruptedRun(runDir, { seams: reconcileSeams });
 			try {
 				const summary = foldRunEvents(
-					readRunEvents(path.join(runsDir, entry.name, "events.jsonl")).events,
+					readRunEvents(path.join(runDir, "events.jsonl")).events,
 				);
 				if (summary === null || summary.outcome === null) {
 					uncleared.push(entry.name);
