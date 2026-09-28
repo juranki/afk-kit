@@ -9,11 +9,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type GitRunner, runGit } from "../extensions/coordinator/git.ts";
 import { runCli } from "./cli.ts";
+import type { ConfigPorts } from "./config.ts";
 import { runImplement } from "./implement.ts";
 import { RUN_EVENT_NAMES, readRunEvents } from "./runs/events.ts";
 import { issueRunsDir, repositoryStateRoot } from "./runs/paths.ts";
@@ -135,12 +137,37 @@ interface RunOptions {
 	config?: ConfigPorts;
 }
 
+/**
+ * A hermetic installed-skills directory: the three pinned implementation
+ * skills (ADR 0015), deterministic content so tests can assert hashes.
+ */
+function skillBodies(): Record<string, string> {
+	return {
+		implement: "---\nname: implement\n---\nImplement the work.\n",
+		tdd: "---\nname: tdd\n---\nRed, then green.\n",
+		"codebase-design": "---\nname: codebase-design\n---\nDeep modules.\n",
+	};
+}
+
+function installSkills(): { root: string; sha256: Record<string, string> } {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "afk-skills-"));
+	const sha256: Record<string, string> = {};
+	for (const [name, body] of Object.entries(skillBodies())) {
+		fs.mkdirSync(path.join(root, name), { recursive: true });
+		fs.writeFileSync(path.join(root, name, "SKILL.md"), body);
+		sha256[name] = createHash("sha256").update(body).digest("hex");
+	}
+	return { root, sha256 };
+}
+
 interface Fixture {
 	world: World;
 	xdg: string;
 	out: string[];
 	err: string[];
 	runtime: ReturnType<typeof fakeRuntime>;
+	/** The hermetic installed-skills root and its content hashes. */
+	skills: { root: string; sha256: Record<string, string> };
 	run: (options?: RunOptions) => Promise<number>;
 }
 
@@ -155,6 +182,7 @@ async function fixture(
 	);
 	await world.git(["remote", "set-url", "origin", GITHUB_URL]);
 	const xdg = fs.mkdtempSync(path.join(os.tmpdir(), "afk-implement-"));
+	const skills = installSkills();
 	const out: string[] = [];
 	const err: string[] = [];
 	return {
@@ -163,6 +191,7 @@ async function fixture(
 		out,
 		err,
 		runtime,
+		skills,
 		run: (options: RunOptions = {}) =>
 			runImplement({
 				ticket: ISSUE,
@@ -175,7 +204,7 @@ async function fixture(
 				ports: {
 					confinementRuntime: runtime.port,
 					git: offlineFetchGit(world),
-					...(options.config ? { config: options.config } : {}),
+					config: { skillsRoot: skills.root, ...options.config },
 				},
 			}),
 	};
@@ -502,6 +531,63 @@ describe("runImplement (L2)", () => {
 		const { events } = readRunEvents(path.join(dir, "events.jsonl"));
 		const outcome = events.find((e) => e.name === RUN_EVENT_NAMES.outcome);
 		expect(String(outcome?.payload.reason)).toContain("confinement");
+
+		cleanupWorld(f.world);
+	});
+
+	test("a safe start records the pinned implementation skills' hashes as Run evidence", async () => {
+		const f = await fixture([readinessRule(PASSING_BODY)]);
+		const exit = await f.run();
+
+		expect(exit).toBe(0);
+		const dir = onlyRun(f.xdg);
+		const { events } = readRunEvents(path.join(dir, "events.jsonl"));
+		const recorded = events.find(
+			(e) => e.name === RUN_EVENT_NAMES.implementationSkills,
+		);
+		expect(recorded).toBeDefined();
+		const skills = recorded?.payload.skills as Array<{
+			name: string;
+			path: string;
+			sha256: string;
+		}>;
+		expect(skills.map((s) => s.name)).toEqual([
+			"implement",
+			"tdd",
+			"codebase-design",
+		]);
+		for (const skill of skills) {
+			expect(skill.path).toBe(path.join(f.skills.root, skill.name, "SKILL.md"));
+			expect(skill.sha256).toBe(f.skills.sha256[skill.name]);
+		}
+
+		cleanupWorld(f.world);
+	});
+
+	test("a missing implementation skill refuses durably, naming the skill", async () => {
+		const f = await fixture([readinessRule(PASSING_BODY)]);
+		fs.rmSync(path.join(f.skills.root, "tdd"), {
+			recursive: true,
+			force: true,
+		});
+		const exit = await f.run();
+
+		expect(exit).toBe(1);
+		const dir = onlyRun(f.xdg);
+		const { events } = readRunEvents(path.join(dir, "events.jsonl"));
+		const outcome = events.find((e) => e.name === RUN_EVENT_NAMES.outcome);
+		expect(outcome?.payload.outcome).toBe("refused");
+		expect(String(outcome?.payload.reason)).toContain("implementation-skills");
+		const report = JSON.parse(
+			fs.readFileSync(
+				path.join(dir, "artifacts", "preflight", "report.json"),
+				"utf8",
+			),
+		) as { checks: { name: string; detail: string }[] };
+		const failed = report.checks.find(
+			(c) => c.name === "implementation-skills",
+		);
+		expect(failed?.detail).toContain("tdd");
 
 		cleanupWorld(f.world);
 	});

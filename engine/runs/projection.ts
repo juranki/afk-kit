@@ -5,7 +5,12 @@
  * Unknown event names never break the fold — they still count as activity.
  */
 
-import { RUN_EVENT_NAMES, type RunEvent, type RunOutcome } from "./events.ts";
+import {
+	type ImplementationSkill,
+	RUN_EVENT_NAMES,
+	type RunEvent,
+	type RunOutcome,
+} from "./events.ts";
 
 /** What a human sees about one Run, folded from its events. */
 export interface RunSummary {
@@ -31,6 +36,8 @@ export interface RunSummary {
 	worktree: string | null;
 	/** Sha256 of the immutable brief snapshot. */
 	briefHash: string | null;
+	/** The pinned implementation skills' preflight records (ADR 0015), or null. */
+	implementationSkills: ImplementationSkill[] | null;
 	latestEvent: { seq: number; name: string; ts: string } | null;
 	eventCount: number;
 	/**
@@ -61,6 +68,7 @@ export function emptyRunSummary(): RunSummary {
 		branch: null,
 		worktree: null,
 		briefHash: null,
+		implementationSkills: null,
 		latestEvent: null,
 		eventCount: 0,
 		lockAlive: null,
@@ -123,6 +131,20 @@ export function foldRunEvents(events: RunEvent[]): RunSummary | null {
 				}
 				const pr = asNumber(event.payload.pr);
 				if (pr !== null) summary.pr = pr;
+				break;
+			}
+			case RUN_EVENT_NAMES.implementationSkills: {
+				const skills = event.payload.skills;
+				if (Array.isArray(skills)) {
+					summary.implementationSkills = skills.filter(
+						(skill): skill is ImplementationSkill =>
+							typeof skill === "object" &&
+							skill !== null &&
+							typeof (skill as ImplementationSkill).name === "string" &&
+							typeof (skill as ImplementationSkill).path === "string" &&
+							typeof (skill as ImplementationSkill).sha256 === "string",
+					);
+				}
 				break;
 			}
 			default:

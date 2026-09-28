@@ -9,15 +9,18 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
 	type AgentSessionLike,
 	parseAgentDefinition,
+	resolveMountedSkillPaths,
 	runAgentSession,
 	type SessionFactory,
 } from "./agent-runner.ts";
+import type { ImplementationSkill } from "./runs/events.ts";
 
 function scratch(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "afk-agent-"));
@@ -236,5 +239,132 @@ describe("parseAgentDefinition", () => {
 		expect(parsed.thinking).toBeUndefined();
 		expect(parsed.tools).toEqual([]);
 		expect(parsed.body).toContain("no frontmatter here");
+	});
+
+	test("reads a skills frontmatter pin as a list of names", () => {
+		const text = [
+			"---",
+			"name: implementer",
+			"skills: [implement, tdd, codebase-design]",
+			"tools: [read, edit, write, bash]",
+			"---",
+			"",
+			"Implement one ticket's change.",
+		].join("\n");
+		const parsed = parseAgentDefinition(text);
+		expect(parsed.skills).toEqual(["implement", "tdd", "codebase-design"]);
+	});
+
+	test("a definition without a skills pin carries none", () => {
+		const pinned = parseAgentDefinition(
+			["---", "name: implementer", "tools: [read]", "---", ""].join("\n"),
+		);
+		expect(pinned.skills).toEqual([]);
+		const bare = parseAgentDefinition("no frontmatter here");
+		expect(bare.skills).toEqual([]);
+	});
+});
+
+describe("shipped agent definitions", () => {
+	const agentsDir = path.join(import.meta.dir, "agents");
+
+	test("the Implementer pins the installed implementation skills (ADR 0015)", () => {
+		const definition = parseAgentDefinition(
+			fs.readFileSync(path.join(agentsDir, "implementer.md"), "utf8"),
+		);
+		expect(definition.skills).toEqual(["implement", "tdd", "codebase-design"]);
+	});
+
+	test("the Implementer's definition supersedes the loop-owned steps of its mounted skills", () => {
+		const definition = parseAgentDefinition(
+			fs.readFileSync(path.join(agentsDir, "implementer.md"), "utf8"),
+		);
+		// ADR 0015: reviewing the change and publishing it are loop-owned
+		// steps; the mounted text stays verbatim, the supersede is carried
+		// in the role's definition.
+		expect(definition.body).toContain("not the Implementer's");
+		expect(definition.body).toContain("review");
+		expect(definition.body).toContain("publish");
+	});
+
+	test("the Reviewers mount no skills", () => {
+		for (const file of ["standards-reviewer.md", "spec-reviewer.md"]) {
+			const definition = parseAgentDefinition(
+				fs.readFileSync(path.join(agentsDir, file), "utf8"),
+			);
+			expect(definition.skills).toEqual([]);
+		}
+	});
+});
+
+describe("resolveMountedSkillPaths (ADR 0015)", () => {
+	function skillFile(body: string): string {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "afk-mount-"));
+		const file = path.join(dir, "SKILL.md");
+		fs.writeFileSync(file, body);
+		return file;
+	}
+
+	function record(name: string, file: string): ImplementationSkill {
+		return {
+			name,
+			path: file,
+			sha256: createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
+		};
+	}
+
+	test("mounts the pinned skills' installed paths, in pin order", () => {
+		const implement = skillFile("implement");
+		const tdd = skillFile("tdd");
+		const paths = resolveMountedSkillPaths(
+			["tdd", "implement"],
+			[record("implement", implement), record("tdd", tdd)],
+		);
+		expect(paths).toEqual([tdd, implement]);
+	});
+
+	test("a definition with no pin mounts nothing", () => {
+		const file = skillFile("implement");
+		expect(resolveMountedSkillPaths([], [record("implement", file)])).toEqual(
+			[],
+		);
+	});
+
+	test("a pin with no preflight records is a loud error, not a fallback", () => {
+		expect(() => resolveMountedSkillPaths(["implement"], undefined)).toThrow(
+			/implement/,
+		);
+	});
+
+	test("a pinned name the Run never recorded is a loud error naming it", () => {
+		const file = skillFile("implement");
+		expect(() =>
+			resolveMountedSkillPaths(
+				["implement", "tdd"],
+				[record("implement", file)],
+			),
+		).toThrow(/tdd/);
+	});
+
+	test("a skill that changed since preflight is a loud error, not a fallback", () => {
+		const file = skillFile("the text preflight hashed");
+		const stale = record("implement", file);
+		fs.writeFileSync(file, "the text the session would now see");
+		expect(() => resolveMountedSkillPaths(["implement"], [stale])).toThrow(
+			/implement/,
+		);
+	});
+
+	test("an unreadable pinned skill is a loud error naming it", () => {
+		const missing = path.join(
+			fs.mkdtempSync(path.join(os.tmpdir(), "afk-mount-")),
+			"SKILL.md",
+		);
+		expect(() =>
+			resolveMountedSkillPaths(
+				["tdd"],
+				[{ name: "tdd", path: missing, sha256: "aa" }],
+			),
+		).toThrow(/tdd/);
 	});
 });

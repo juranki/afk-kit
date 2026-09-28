@@ -27,12 +27,20 @@ import {
 	type ReadinessInput,
 	runGh,
 } from "../extensions/readiness/gh.ts";
-import { type ConfigPorts, validateEngineConfig } from "./config.ts";
+import {
+	type ConfigPorts,
+	resolveImplementationSkills,
+	validateEngineConfig,
+} from "./config.ts";
 import {
 	type ConfinementRuntimePort,
 	probeConfinementCapability,
 } from "./preflight.ts";
-import { RUN_EVENT_NAMES, readRunEvents } from "./runs/events.ts";
+import {
+	type ImplementationSkill,
+	RUN_EVENT_NAMES,
+	readRunEvents,
+} from "./runs/events.ts";
 import {
 	afkStateRoot,
 	issueRunsDir,
@@ -111,6 +119,8 @@ interface StartFacts {
 	readinessInput: ReadinessInput | null;
 	/** The freshly fetched origin/main SHA, when resolvable. */
 	baseSha: string | null;
+	/** The resolved implementation skills, when the pin validated (ADR 0015). */
+	implementationSkills: ImplementationSkill[] | null;
 	/** Why the primary checkout is dirty, when it is. */
 	dirty: string | null;
 }
@@ -149,6 +159,7 @@ async function gatherStartFacts(options: {
 		checks,
 		readinessInput: null,
 		baseSha: null,
+		implementationSkills: null,
 		dirty: null,
 	};
 
@@ -294,6 +305,28 @@ async function gatherStartFacts(options: {
 		checks.push(fail("engine-config", messageOf(error)));
 	}
 
+	// Implementation skills: every pinned skill must resolve to its
+	// installed SKILL.md (ADR 0015); the resolutions' SHA-256 hashes become
+	// Run evidence, and a missing skill refuses the start naming it.
+	try {
+		const skills = await resolveImplementationSkills(ports.config);
+		if (skills.ok) {
+			facts.implementationSkills = skills.skills;
+			checks.push(
+				pass(
+					"implementation-skills",
+					skills.skills
+						.map((s) => `${s.name} (${s.sha256.slice(0, 12)})`)
+						.join(", "),
+				),
+			);
+		} else {
+			checks.push(fail("implementation-skills", skills.problems.join("; ")));
+		}
+	} catch (error) {
+		checks.push(fail("implementation-skills", messageOf(error)));
+	}
+
 	// Confinement capability: the sandbox runtime must initialize.
 	try {
 		const probe = await probeConfinementCapability({
@@ -430,6 +463,15 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 					payload: {
 						message: `primary checkout is dirty (${facts.dirty}) — diagnostic only, it does not block`,
 					},
+				});
+			}
+			if (facts.implementationSkills !== null) {
+				// Evidence of the precise text the Implementer sessions will
+				// be given (ADR 0015): name, path, and SHA-256 per pinned
+				// skill, recorded even if another check refuses the start.
+				recordEvent(handle, {
+					name: RUN_EVENT_NAMES.implementationSkills,
+					payload: { skills: facts.implementationSkills },
 				});
 			}
 

@@ -222,6 +222,10 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 						"agents",
 						"implementer.md",
 					),
+					// The pinned skills and their preflight hashes come from
+					// the Run's own evidence (ADR 0015); the factory refuses
+					// to spawn on a missing record or a hash mismatch.
+					pinnedSkills: facts?.implementationSkills ?? undefined,
 					modelRuntime: ports.modelRuntime,
 				});
 			const startedMs = Date.now();
