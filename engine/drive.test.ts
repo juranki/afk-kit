@@ -6,7 +6,14 @@
  * store. The environment is swapped, never the code.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	describe,
+	expect,
+	setDefaultTimeout,
+	test,
+} from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { slugFor } from "../extensions/coordinator/slug.ts";
@@ -31,6 +38,9 @@ import {
 	type GhRule,
 	makeWorld,
 } from "./test-world.ts";
+
+// Real Git/gh subprocesses need runner headroom, not short policy timers.
+setDefaultTimeout(60_000);
 
 const ISSUE = 61;
 const TITLE = "Drive Claim through approved handoff with typed ports";
@@ -940,10 +950,78 @@ test("the Run deadline policy and the settle cap are the durable spec's", () => 
 	expect(INTERRUPT_SETTLE_CAP_MS).toBe(30_000);
 });
 
+class ControlledClock {
+	private time: number;
+	private waits = new Map<symbol, { at: number; fire: () => void }>();
+
+	constructor(startedMs: number) {
+		this.time = startedMs;
+	}
+
+	now(): number {
+		return this.time;
+	}
+
+	schedule(delayMs: number, fire: () => void): () => void {
+		const id = Symbol();
+		this.waits.set(id, { at: this.time + delayMs, fire });
+		return () => {
+			this.waits.delete(id);
+		};
+	}
+
+	get pending(): number {
+		return this.waits.size;
+	}
+
+	advance(ms: number): void {
+		const target = this.time + ms;
+		for (;;) {
+			const next = [...this.waits.entries()]
+				.filter(([, wait]) => wait.at <= target)
+				.sort((a, b) => a[1].at - b[1].at)[0];
+			if (next === undefined) break;
+			this.time = next[1].at;
+			this.waits.delete(next[0]);
+			next[1].fire();
+		}
+		this.time = target;
+	}
+}
+
+async function within<T>(
+	promise: Promise<T>,
+	ms: number,
+	what: string,
+): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(
+					() => reject(new Error(`timed out waiting for ${what}`)),
+					ms,
+				);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+function entrySignal(): { entered: Promise<void>; enter: () => void } {
+	let enter = () => {};
+	const entered = new Promise<void>((resolve) => {
+		enter = resolve;
+	});
+	return { entered, enter };
+}
+
 describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () => {
 	function until(condition: () => boolean, what: string): Promise<void> {
 		return (async () => {
-			const budget = Date.now() + 5_000;
+			const budget = Date.now() + 30_000;
 			while (!condition()) {
 				if (Date.now() > budget) {
 					throw new Error(`timed out waiting for ${what}`);
@@ -953,21 +1031,8 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 		})();
 	}
 
-	interface InterruptControls {
-		world: Awaited<ReturnType<typeof makeWorld>>;
-		handle: RunHandle;
-		/** Resolves once the world and handle exist — before the drive starts. */
-		ready: Promise<void>;
-		/** Resolves with the drive's exit once the Run has finalized. */
-		done: Promise<0 | 1 | 2 | 3>;
-		launched: number[];
-		reviewed: number[];
-		fire: (signal: string) => void;
-		interruption: Interruption;
-	}
-
-	/** Start a driven Run whose signals and interruption the test controls. */
-	function interrupted(options: {
+	/** Start a driven Run with controllable time and explicit port entry. */
+	async function interrupted(options: {
 		rules: GhRule[];
 		runCycle: (
 			cycle: number,
@@ -979,63 +1044,116 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 		) => Promise<ReviewOutcome>;
 		deadlineMs?: number | null;
 		settleCapMs?: number;
-	}): InterruptControls {
-		let world: Awaited<ReturnType<typeof makeWorld>> | undefined;
-		let handle: RunHandle | undefined;
+		elapsedBeforeDriveMs?: number;
+		/** Hold one real gh subprocess until the test explicitly releases it. */
+		gateArgs?: string[];
+	}) {
+		const world = await makeWorld(ISSUE, TITLE, options.rules);
+		const handle = startRun(world);
+		const started = eventsOf(handle).find(
+			(e) => e.name === RUN_EVENT_NAMES.started,
+		);
+		if (started === undefined) {
+			cleanupWorld(world);
+			throw new Error("Run has no persisted started event");
+		}
+		const clock = new ControlledClock(Date.parse(started.ts));
+		clock.advance(options.elapsedBeforeDriveMs ?? 0);
+		const releaseFile = path.join(world.root, "release-gh");
+		if (options.gateArgs !== undefined) {
+			const gated = options.rules.map((rule) =>
+				JSON.stringify(rule.args) === JSON.stringify(options.gateArgs)
+					? { ...rule, waitForFile: releaseFile }
+					: rule,
+			);
+			world.setRules([...gated, ...baseRules(ISSUE, TITLE)]);
+		}
+		const cycleEntry = entrySignal();
+		const reviewEntry = entrySignal();
 		const launched: number[] = [];
 		const reviewed: number[] = [];
 		const interruption = createInterruption();
 		let fire: (signal: string) => void = () => {
 			throw new Error("the signal handler was never installed");
 		};
-		let readyResolve: (() => void) | undefined;
-		const ready = new Promise<void>((resolve) => {
-			readyResolve = resolve;
+		let signalsInstalled = false;
+		const done = driveRun({
+			handle,
+			seams: world.seams,
+			runCycle: async (cycle) => {
+				launched.push(cycle);
+				cycleEntry.enter();
+				return options.runCycle(cycle, interruption);
+			},
+			runReviews: async (cycle) => {
+				reviewed.push(cycle);
+				reviewEntry.enter();
+				return (options.runReviews ?? neverReviews())(cycle, interruption);
+			},
+			clock,
+			interruption,
+			installSignals: (handler) => {
+				fire = handler;
+				signalsInstalled = true;
+				return () => {
+					signalsInstalled = false;
+				};
+			},
+			deadlineMs: options.deadlineMs ?? null,
+			settleCapMs: options.settleCapMs ?? INTERRUPT_SETTLE_CAP_MS,
+			io: { stdout: () => {}, stderr: () => {} },
 		});
-		const done = (async (): Promise<0 | 1 | 2 | 3> => {
-			world = await makeWorld(ISSUE, TITLE, options.rules);
-			handle = startRun(world);
-			readyResolve?.();
-			return driveRun({
-				handle,
-				seams: world.seams,
-				runCycle: async (cycle) => {
-					launched.push(cycle);
-					return options.runCycle(cycle, interruption);
-				},
-				runReviews: async (cycle) => {
-					reviewed.push(cycle);
-					return (options.runReviews ?? neverReviews())(cycle, interruption);
-				},
-				interruption,
-				installSignals: (handler) => {
-					fire = (signal) => handler(signal);
-					return () => {};
-				},
-				...(options.deadlineMs === undefined
-					? { deadlineMs: null }
-					: { deadlineMs: options.deadlineMs }),
-				...(options.settleCapMs === undefined
-					? {}
-					: { settleCapMs: options.settleCapMs }),
-				io: { stdout: () => {}, stderr: () => {} },
-			});
-		})();
+		// A failure before a test awaits done must never become unhandled.
+		void done.catch(() => {});
+		const waitForEntry = async (entered: Promise<void>) => {
+			await within(
+				Promise.race([
+					entered,
+					done.then(() => {
+						throw new Error("Run finalized before operation entry");
+					}),
+				]),
+				30_000,
+				"operation entry",
+			);
+		};
 		return {
-			get world() {
-				if (world === undefined) throw new Error("world not ready yet");
-				return world;
-			},
-			get handle() {
-				if (handle === undefined) throw new Error("handle not ready yet");
-				return handle;
-			},
-			ready,
+			world,
+			handle,
+			clock,
 			done,
 			launched,
 			reviewed,
-			fire: (signal) => fire(signal),
+			cycleEntered: () => waitForEntry(cycleEntry.entered),
+			reviewEntered: () => waitForEntry(reviewEntry.entered),
+			fire: (signal: string) => fire(signal),
 			interruption,
+			releaseGh: () => fs.writeFileSync(releaseFile, ""),
+			ghEntered: () =>
+				until(
+					() => fs.existsSync(`${releaseFile}.entered`),
+					"the gated gh operation to enter",
+				),
+			get signalsInstalled() {
+				return signalsInstalled;
+			},
+			async cleanup() {
+				interruption.request("test cleanup");
+				fs.writeFileSync(releaseFile, "");
+				// Let real subprocesses finish first. A wedged scripted port is
+				// then cut off by controlled time, never an unhandled rejection.
+				const capTimer = setTimeout(
+					() => clock.advance(options.settleCapMs ?? INTERRUPT_SETTLE_CAP_MS),
+					10_000,
+				);
+				try {
+					await within(done, 25_000, "driver cleanup");
+				} finally {
+					clearTimeout(capTimer);
+					// Preserve an unexpectedly still-live fixture for diagnosis.
+					if (!fs.existsSync(handle.lockPath)) cleanupWorld(world);
+				}
+			},
 		};
 	}
 
@@ -1070,16 +1188,36 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 		],
 	};
 
-	test("SIGINT during a cycle escalates immediately once the aborted session settles", async () => {
-		const s = interrupted({
+	test("SIGINT during a cycle retains an honest outcome settling inside the window", async () => {
+		const settlement = entrySignal();
+		const s = await interrupted({
 			rules: [...bootstrapRules(), ...escalationRules()],
-			runCycle: hangUntilAborted,
-			settleCapMs: 5_000,
+			runCycle: async (cycle) => {
+				await settlement.entered;
+				return {
+					status: "failed",
+					cycle,
+					reason: "the implementer session was aborted",
+				};
+			},
+			deadlineMs: RUN_DEADLINE_MS,
+			gateArgs: ["issue", "comment", String(ISSUE)],
 		});
 		try {
-			await until(() => s.launched.length === 1, "cycle 1 to launch");
+			await s.cycleEntered();
 			s.fire("SIGINT");
+			s.fire("SIGTERM"); // First interruption still wins.
+			s.clock.advance(INTERRUPT_SETTLE_CAP_MS - 1);
+			expect(s.clock.pending).toBe(2); // Deadline and this operation's cap.
+			settlement.enter();
+			await s.ghEntered(); // Escalation still running; cycle wait is over.
+			expect(s.clock.pending).toBe(1); // Only the Run deadline remains.
+			s.clock.advance(1);
+			s.releaseGh();
 			expect(await s.done).toBe(2);
+			expect(s.clock.pending).toBe(0);
+			expect(s.signalsInstalled).toBe(false);
+			expect(fs.existsSync(s.handle.lockPath)).toBe(false);
 			const outcome = outcomeEvent(s.handle);
 			expect(outcome?.payload.outcome).toBe("escalated");
 			expect(outcome?.payload.reason).toContain("SIGINT");
@@ -1105,23 +1243,32 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 			);
 			expect(JSON.stringify(notice?.payload)).toContain("SIGINT");
 		} finally {
-			await cleanupWorld(s.world);
+			settlement.enter();
+			await s.cleanup();
 		}
 	});
 
 	test("an operation that never settles is cut off by the settle cap", async () => {
-		const s = interrupted({
+		const s = await interrupted({
 			rules: [...bootstrapRules(), ...escalationRules()],
 			runCycle: () => new Promise(() => {}), // ignores the abort, never settles
-			settleCapMs: 30,
 		});
 		try {
-			await until(() => s.launched.length === 1, "cycle 1 to launch");
+			await s.cycleEntered();
 			s.fire("SIGTERM");
-			const started = Date.now();
+			expect(s.clock.pending).toBe(1);
+			s.clock.advance(INTERRUPT_SETTLE_CAP_MS - 1);
+			expect(
+				eventsOf(s.handle).some(
+					(e) =>
+						e.name === RUN_EVENT_NAMES.sideEffectCompleted &&
+						e.payload.operation === "cycle",
+				),
+			).toBe(false);
+			expect(fs.existsSync(s.handle.lockPath)).toBe(true);
+			s.clock.advance(1);
 			expect(await s.done).toBe(2);
-			// The cap, not the wedged session, bounded the wait.
-			expect(Date.now() - started).toBeLessThan(5_000);
+			expect(s.clock.pending).toBe(0);
 			const completed = eventsOf(s.handle).find(
 				(e) =>
 					e.name === RUN_EVENT_NAMES.sideEffectCompleted &&
@@ -1139,20 +1286,73 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 			const outcome = outcomeEvent(s.handle);
 			expect(outcome?.payload.reason).toContain("SIGTERM");
 		} finally {
-			await cleanupWorld(s.world);
+			await s.cleanup();
+		}
+	});
+
+	test("deadline timing includes time elapsed before driving", async () => {
+		const s = await interrupted({
+			rules: [...bootstrapRules(), ...escalationRules()],
+			runCycle: hangUntilAborted,
+			deadlineMs: RUN_DEADLINE_MS,
+			elapsedBeforeDriveMs: RUN_DEADLINE_MS - 1_000,
+		});
+		try {
+			await s.cycleEntered();
+			s.clock.advance(999);
+			expect(s.interruption.reason()).toBeNull();
+			s.clock.advance(1);
+			expect(s.interruption.reason()).toContain("deadline");
+			expect(await s.done).toBe(2);
+			expect(outcomeEvent(s.handle)?.payload.stage).toBe("cycle");
+			expect(s.launched).toEqual([1]);
+			expect(s.reviewed).toEqual([]);
+		} finally {
+			await s.cleanup();
+		}
+	});
+
+	test("deadline expiry during bootstrap escalates without launching a cycle", async () => {
+		const s = await interrupted({
+			rules: [...bootstrapRules(), ...escalationRules()],
+			runCycle: hangUntilAborted,
+			deadlineMs: RUN_DEADLINE_MS,
+			elapsedBeforeDriveMs: RUN_DEADLINE_MS - 1_000,
+			gateArgs: ["pr", "create", "--draft"],
+		});
+		try {
+			await s.ghEntered();
+			s.clock.advance(1_000);
+			expect(s.interruption.reason()).toContain("deadline");
+			s.clock.advance(INTERRUPT_SETTLE_CAP_MS - 1);
+			s.releaseGh();
+			expect(await s.done).toBe(2);
+			const outcome = outcomeEvent(s.handle);
+			expect(outcome?.payload.stage).toBe("bootstrap");
+			expect(outcome?.payload.pr).toBe(99);
+			expect(s.launched).toEqual([]);
+			expect(s.reviewed).toEqual([]);
+			expect(
+				s.world.argvLog().filter((args) => args.includes("issue comment")),
+			).toHaveLength(1);
+			expect(s.clock.pending).toBe(0);
+		} finally {
+			await s.cleanup();
 		}
 	});
 
 	test("the two-hour Run deadline escalates mid-cycle", async () => {
-		const s = interrupted({
+		const s = await interrupted({
 			rules: [...bootstrapRules(), ...escalationRules()],
 			runCycle: hangUntilAborted,
-			settleCapMs: 5_000,
-			deadlineMs: 800,
+			deadlineMs: RUN_DEADLINE_MS,
 		});
 		try {
-			await s.ready;
-			await until(() => s.launched.length === 1, "cycle 1 to launch");
+			await s.cycleEntered();
+			s.clock.advance(RUN_DEADLINE_MS - 1);
+			expect(s.interruption.reason()).toBeNull();
+			s.clock.advance(1);
+			expect(s.interruption.reason()).toContain("deadline");
 			expect(await s.done).toBe(2);
 			const outcome = outcomeEvent(s.handle);
 			expect(outcome?.payload.reason).toContain("deadline");
@@ -1163,27 +1363,34 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 				.filter((args) => args.includes("issue comment"));
 			expect(comments).toHaveLength(1);
 		} finally {
-			await cleanupWorld(s.world);
+			await s.cleanup();
 		}
 	});
 
 	test("a review approval that settles after the interrupt loses to it", async () => {
-		const s = interrupted({
+		const settlement = entrySignal();
+		const s = await interrupted({
 			rules: [...bootstrapRules(), ...escalationRules()],
 			runCycle: async () => VERIFIED_FAST,
-			runReviews: (_cycle, interruption) =>
-				new Promise((resolve) => {
-					const off = interruption.onRequest(() => {
-						off();
-						resolve(APPROVED_FAST);
-					});
-				}),
-			settleCapMs: 5_000,
+			runReviews: async () => {
+				await settlement.entered;
+				return APPROVED_FAST;
+			},
 		});
 		try {
-			await until(() => s.reviewed.length === 1, "the reviews to launch");
+			await s.reviewEntered();
 			s.fire("SIGINT");
+			s.clock.advance(INTERRUPT_SETTLE_CAP_MS - 1);
+			settlement.enter();
 			expect(await s.done).toBe(2);
+			expect(
+				eventsOf(s.handle).find(
+					(e) =>
+						e.name === RUN_EVENT_NAMES.sideEffectCompleted &&
+						e.payload.operation === "review",
+				)?.payload.status,
+			).toBe("approved");
+			expect(s.clock.pending).toBe(0);
 			// The approval is recorded, but the human cancelled: no handoff.
 			expect(s.world.argvLog().some((args) => args.includes("pr ready"))).toBe(
 				false,
@@ -1192,7 +1399,8 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 			expect(s.launched).toEqual([1]);
 			expect(s.reviewed).toEqual([1]);
 		} finally {
-			await cleanupWorld(s.world);
+			settlement.enter();
+			await s.cleanup();
 		}
 	});
 
@@ -1220,7 +1428,7 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 				},
 			],
 		};
-		const s = interrupted({
+		const s = await interrupted({
 			rules: [
 				prList,
 				...bootstrapRules(),
@@ -1231,7 +1439,7 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 						labels: [{ name: "ready-for-agent" }, { name: "in-progress" }],
 					},
 				},
-				{ args: ["pr", "edit", "99"], json: {}, delayMs: 300 },
+				{ args: ["pr", "edit", "99"], json: {} },
 				{ args: ["pr", "ready", "99"], json: {} },
 				...escalationRules(),
 			],
@@ -1253,16 +1461,20 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 				return { ...VERIFIED_FAST, cycle };
 			},
 			runReviews: async () => APPROVED_FAST,
-			settleCapMs: 10_000,
+			gateArgs: ["pr", "edit", "99"],
 		});
 		try {
-			await s.ready;
-			await until(
-				() => s.world.argvLog().some((args) => args.startsWith("pr edit")),
-				"the handoff to reach pr edit",
-			);
+			await s.ghEntered();
 			s.fire("SIGINT");
+			s.clock.advance(INTERRUPT_SETTLE_CAP_MS - 1);
+			expect(
+				s.world.argvLog().some((args) => args.startsWith("pr ready")),
+			).toBe(false);
+			s.releaseGh();
 			expect(await s.done).toBe(0);
+			expect(s.clock.pending).toBe(0);
+			expect(s.signalsInstalled).toBe(false);
+			expect(fs.existsSync(s.handle.lockPath)).toBe(false);
 			expect(outcomeEvent(s.handle)?.payload.outcome).toBe(
 				"handed-over-to-maintainer",
 			);
@@ -1270,12 +1482,12 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 				s.world.argvLog().some((args) => args.includes("issue comment")),
 			).toBe(false);
 		} finally {
-			await cleanupWorld(s.world);
+			await s.cleanup();
 		}
-	}, 20_000);
+	});
 
 	test("state corruption escalates immediately instead of crashing the drive", async () => {
-		const s = interrupted({
+		const s = await interrupted({
 			rules: [...bootstrapRules(), ...escalationRules()],
 			runCycle: async (cycle) => {
 				if (cycle === 2) {
@@ -1302,12 +1514,12 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 			// Cycle 1 failed under the cap; Cycle 2 threw on the corruption.
 			expect(s.launched).toEqual([1, 2]);
 		} finally {
-			await cleanupWorld(s.world);
+			await s.cleanup();
 		}
 	});
 
 	test("a broken journal escalates instead of executing unjournaled side effects", async () => {
-		const s = interrupted({
+		const s = await interrupted({
 			rules: [...bootstrapRules(), ...escalationRules()],
 			runCycle: async (cycle) => {
 				if (cycle === 2) {
@@ -1333,7 +1545,7 @@ describe("driveRun: interruption reconciles to one Escalation (ticket #65)", () 
 			// broken journal stops the Run before Cycle 3.
 			expect(s.launched).toEqual([1, 2]);
 		} finally {
-			await cleanupWorld(s.world);
+			await s.cleanup();
 		}
 	});
 });
