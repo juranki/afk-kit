@@ -2,9 +2,8 @@
  * Tests for the `afk` CLI (ticket afk-kit #59): strict argument parsing
  * (L1) and the `afk status` path end-to-end against a real temp state root
  * and a real repository checkout (L2). Exit codes follow the durable spec's
- * CLI contract; status success is 0 and usage errors take 2 (a code status
- * can never collide with: 1 is a pre-Claim refusal, 2 is a claimed Run
- * Escalated, 3 is durable-failure — none reachable from status).
+ * CLI contract: 0 status/handoff success, 1 pre-Claim refusal (including
+ * usage), 2 claimed-Run Escalation, 3 internal/durable-Escalation failure.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -40,13 +39,13 @@ describe("parseImplementArgs", () => {
 		expect(parseImplementArgs([])).toBeNull();
 	});
 
-	test("usage errors exit 2 with usage on stderr", async () => {
+	test("usage errors are pre-Claim refusals with usage on stderr", async () => {
 		const bad = io(checkout());
-		expect(await runCli(["implement", "#60"], bad.io)).toBe(2);
+		expect(await runCli(["implement", "#60"], bad.io)).toBe(1);
 		expect(bad.err.join("")).toContain("usage");
 
 		const missing = io(checkout());
-		expect(await runCli(["implement"], missing.io)).toBe(2);
+		expect(await runCli(["implement"], missing.io)).toBe(1);
 		expect(missing.err.join("")).toContain("usage");
 	});
 
@@ -55,6 +54,13 @@ describe("parseImplementArgs", () => {
 		void runCli(["help"], cliIo);
 		expect(out.join("")).toContain("implement");
 	});
+});
+
+test("unrepresentable Ticket numbers refuse instead of rounding or becoming Infinity", () => {
+	for (const raw of ["9007199254740993", "9".repeat(400)]) {
+		expect(parseImplementArgs([raw])).toBeNull();
+		expect(parseStatusArgs([raw])).toBeNull();
+	}
 });
 
 describe("parseStatusArgs", () => {
@@ -162,18 +168,18 @@ describe("runCli status", () => {
 		expect(text).not.toContain("#59");
 	});
 
-	test("usage errors exit 2 with help on stderr", async () => {
+	test("usage errors are pre-Claim refusals with help on stderr", async () => {
 		const cwd = checkout();
 		const bad = io(cwd);
-		expect(await runCli(["status", "abc"], bad.io)).toBe(2);
+		expect(await runCli(["status", "abc"], bad.io)).toBe(1);
 		expect(bad.err.join("")).toContain("usage");
 
 		const unknown = io(cwd);
-		expect(await runCli(["implement"], unknown.io)).toBe(2);
+		expect(await runCli(["implement"], unknown.io)).toBe(1);
 		expect(unknown.err.join("")).toContain("usage");
 
 		const none = io(cwd);
-		expect(await runCli([], none.io)).toBe(2);
+		expect(await runCli([], none.io)).toBe(1);
 	});
 
 	test("help exits 0 and prints usage", async () => {

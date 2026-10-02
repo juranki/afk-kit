@@ -56,6 +56,8 @@ interface DriveIo {
 export interface DriveOptions {
 	/** The Run to drive; its immutable brief snapshot is never touched. */
 	handle: RunHandle;
+	/** Borrow the start operation's lock without a takeover gap. Caller releases it. */
+	lock?: RunLock;
 	seams: EngineSeams;
 	/** The Implement–Verify port (scripted in #61, real in #62). */
 	runCycle: CyclePort;
@@ -378,7 +380,7 @@ export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 
 	let lock: RunLock;
 	try {
-		lock = acquireRunLock(handle);
+		lock = options.lock ?? acquireRunLock(handle);
 	} catch (error) {
 		if (error instanceof RunStoreError) {
 			io.stderr(`afk: cannot drive run ${handle.runId}: ${error.message}\n`);
@@ -416,7 +418,7 @@ export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 	} finally {
 		cancelDeadline?.();
 		uninstallSignals();
-		releaseRunLock(lock, handle);
+		if (options.lock === undefined) releaseRunLock(lock, handle);
 	}
 }
 

@@ -6,7 +6,14 @@
 	"bin": {
 		"afk": "./engine/cli.ts"
 	},
-	"description": "AFK delivery toolkit for pi: coordinator mechanics and workflow skills",
+	"description": "Deterministic AFK delivery Engine and readiness tooling for pi",
+	"files": [
+		"engine/**/*.ts",
+		"engine/agents/*.md",
+		"extensions/**/*.ts",
+		"!**/*.test.ts",
+		"!engine/test-world.ts"
+	],
 	"keywords": [
 		"pi-package"
 	],
@@ -19,12 +26,9 @@
 	},
 	"pi": {
 		"extensions": [
-			"./extensions/readiness/index.ts",
-			"./extensions/coordinator/index.ts"
+			"./extensions/readiness/index.ts"
 		],
-		"skills": [
-			"./skills"
-		]
+		"skills": []
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "*",

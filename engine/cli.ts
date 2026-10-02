@@ -1,19 +1,16 @@
+#!/usr/bin/env bun
 /**
- * The `afk` CLI (ticket afk-kit #59): today `afk status [issue-number]` —
- * the read-only monitoring boundary; later tickets add `afk implement
- * <issue-number>` (#60) and the rest of the durable loop.
- *
- * Exit codes follow the durable spec's CLI contract: 0 success; 1 pre-Claim
- * refusal; 2 claimed-Run Escalated (also used for usage errors, which no
- * status path can collide with); 3 internal/configuration failure where a
- * durable Escalation could not complete.
+ * The Engine-only CLI: `afk implement <issue-number>` drives one Ticket to
+ * handoff or Escalation; `afk status [issue-number]` renders durable evidence.
+ * Exits: 0 handoff/status success; 1 pre-Claim refusal (including usage);
+ * 2 claimed-Run Escalation; 3 failure preventing durable Escalation.
  */
 
 import * as os from "node:os";
 import * as path from "node:path";
 import { runGit } from "../extensions/coordinator/git.ts";
 import { runGh } from "../extensions/readiness/gh.ts";
-import { runImplement } from "./implement.ts";
+import { type ImplementOptions, runImplement } from "./implement.ts";
 import { afkStateRoot } from "./runs/paths.ts";
 import { finalizeInterruptedRun } from "./runs/reconcile.ts";
 import {
@@ -33,7 +30,7 @@ commands:
 
 Run evidence lives outside every repository, under
 \${XDG_STATE_HOME:-~/.local/state}/afk/github.com/<owner>/<repo>/.
-exit codes: 0 success · 1 pre-Claim refusal · 2 escalated or usage · 3 internal failure
+exit codes: 0 handoff/status success · 1 pre-Claim refusal · 2 escalated · 3 internal failure
 `;
 
 /** Which CLI environment a run sees; injectable for tests. */
@@ -53,7 +50,8 @@ export function parseStatusArgs(args: string[]): { ticket?: number } | null {
 	if (args.length === 0) return {};
 	if (args.length > 1) return null;
 	const raw = args[0] ?? "";
-	if (!/^[1-9][0-9]*$/.test(raw)) return null;
+	if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw)))
+		return null;
 	return { ticket: Number(raw) };
 }
 
@@ -66,21 +64,32 @@ export function parseStatusArgs(args: string[]): { ticket?: number } | null {
 export function parseImplementArgs(args: string[]): { ticket: number } | null {
 	if (args.length !== 1) return null;
 	const raw = args[0] ?? "";
-	if (!/^[1-9][0-9]*$/.test(raw)) return null;
+	if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw)))
+		return null;
 	return { ticket: Number(raw) };
 }
 
-async function implementCommand(args: string[], io: CliIo): Promise<number> {
+interface CliPorts {
+	/** Typed host seams for integration tests, never CLI flags or environment overrides. */
+	implement?: ImplementOptions["ports"];
+}
+
+async function implementCommand(
+	args: string[],
+	io: CliIo,
+	ports: CliPorts,
+): Promise<number> {
 	const parsed = parseImplementArgs(args);
 	if (parsed === null) {
 		io.stderr(USAGE);
-		return 2;
+		return 1;
 	}
 	return runImplement({
 		ticket: parsed.ticket,
 		cwd: io.cwd,
 		env: io.env,
 		io,
+		ports: ports.implement,
 	});
 }
 
@@ -88,7 +97,7 @@ async function statusCommand(args: string[], io: CliIo): Promise<number> {
 	const parsed = parseStatusArgs(args);
 	if (parsed === null) {
 		io.stderr(USAGE);
-		return 2;
+		return 1;
 	}
 	let repository: { owner: string; repo: string };
 	try {
@@ -122,13 +131,17 @@ async function statusCommand(args: string[], io: CliIo): Promise<number> {
 	return 0;
 }
 
-export async function runCli(argv: string[], io: CliIo): Promise<number> {
+export async function runCli(
+	argv: string[],
+	io: CliIo,
+	ports: CliPorts = {},
+): Promise<number> {
 	const [command = "", ...args] = argv;
 	switch (command) {
 		case "status":
 			return statusCommand(args, io);
 		case "implement":
-			return implementCommand(args, io);
+			return implementCommand(args, io, ports);
 		case "help":
 		case "--help":
 		case "-h":
@@ -137,7 +150,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 		default:
 			if (command) io.stderr(`afk: unknown command "${command}"\n`);
 			io.stderr(USAGE);
-			return 2;
+			return 1;
 	}
 }
 

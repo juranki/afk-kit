@@ -1,7 +1,7 @@
 /**
  * The durable start operation (ticket afk-kit #60, durable spec #46):
- * `afk implement <issue-number>` runs preflight, then readiness on the
- * immutable brief snapshot, and stops at the Claim seam. Every unsafe start
+ * `afk implement <issue-number>` runs preflight, readiness on the immutable
+ * brief snapshot, and the complete deterministic Engine loop. Every unsafe start
  * is a durable `refused` Run — inspectable through `afk status`, naming the
  * failed check, and leaving no Claim and no coordination side effects. When
  * even the refusal cannot be persisted trustworthily, the start exits 3.
@@ -32,10 +32,13 @@ import {
 	resolveImplementationSkills,
 	validateEngineConfig,
 } from "./config.ts";
+import { type CyclePortDeps, createCyclePort } from "./cycle.ts";
+import { createInterruption, driveRun } from "./drive.ts";
 import {
 	type ConfinementRuntimePort,
 	probeConfinementCapability,
 } from "./preflight.ts";
+import { createReviewPort, type ReviewPortDeps } from "./review.ts";
 import {
 	type ImplementationSkill,
 	RUN_EVENT_NAMES,
@@ -72,6 +75,11 @@ interface ImplementPorts {
 	confinementRuntime?: ConfinementRuntimePort;
 	/** Lookup ports for the pinned-configuration validation. */
 	config?: ConfigPorts;
+	/** Agent/confinement ports for seam tests; no CLI or environment overrides. */
+	cycle?: CyclePortDeps["ports"];
+	review?: ReviewPortDeps["ports"];
+	/** Worktree convention root; production uses ~/wt. */
+	worktreeRoot?: string;
 	/** Clock for Run ids and event timestamps. */
 	now?: () => Date;
 }
@@ -395,9 +403,9 @@ function refuseRun(
 }
 
 /**
- * Run the durable start: preflight, readiness on the immutable brief
- * snapshot, stop at the Claim seam. Exit codes: 0 safe start; 1 durable
- * refusal; 3 failure evidence could not be persisted.
+ * Run preflight, readiness, and the Engine under one continuously held lock.
+ * Exits: 0 handoff; 1 pre-Claim refusal; 2 claimed-Run Escalation;
+ * 3 internal failure preventing durable evidence/Escalation.
  */
 export async function runImplement(options: ImplementOptions): Promise<number> {
 	const { ticket, cwd, env, io } = options;
@@ -505,10 +513,32 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 				);
 			}
 
-			io.stdout(
-				`afk implement: #${ticket} passed preflight and readiness — run ${handle.runId} is ready for Claim\n  ${handle.dir}\n`,
-			);
-			return 0;
+			const seams = {
+				gh,
+				git,
+				checkout: cwd,
+				worktreeRoot: ports.worktreeRoot ?? path.join(os.homedir(), "wt"),
+			};
+			const interruption = createInterruption();
+			return await driveRun({
+				handle,
+				lock,
+				seams,
+				io,
+				interruption,
+				runCycle: createCyclePort({
+					handle,
+					seams,
+					brief: snapshot,
+					ports: { ...ports.cycle, interruption },
+				}),
+				runReviews: createReviewPort({
+					handle,
+					seams,
+					brief: snapshot,
+					ports: { ...ports.review, interruption },
+				}),
+			});
 		} finally {
 			releaseRunLock(lock, handle);
 		}

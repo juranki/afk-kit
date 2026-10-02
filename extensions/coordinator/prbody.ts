@@ -1,14 +1,14 @@
 /**
- * Pull-request title and body assembly for the publish op (ticket afk-kit
- * #19). The body's shape and section order are canonical:
+ * Reusable pull-request title and body assembly (ticket afk-kit #19).
+ * The body's shape and section order are canonical:
  * docs/conventions/branching-and-prs.md — `Closes #<n>`, the brief's
  * acceptance criteria as a checklist, touched areas, and the verify commands
- * with their latest results (the op re-runs them in the worktree before
- * pushing; a failing command refuses the publish). Review-round notes are
- * appended by later rounds, not at open time. Pure logic, L1-verified.
+ * with their latest results. The Engine owns Verify, publishing, and
+ * Review evidence; these helpers only shape the supplied facts.
+ * Pure logic, L1-verified.
  */
 
-import { type ParsedBrief, parseBrief } from "../readiness/brief.ts";
+import type { ParsedBrief } from "../readiness/brief.ts";
 
 export interface VerifyResult {
 	command: string;
@@ -37,13 +37,4 @@ export function prBody(
 	}
 
 	return lines.join("\n").replace(/\n+$/, "\n");
-}
-
-/** Convenience wrapper the publish op calls with the raw issue body. */
-export function prBodyFromIssueBody(
-	issueBody: string,
-	issue: number,
-	verifyResults: VerifyResult[],
-): string {
-	return prBody(parseBrief(issueBody), issue, verifyResults);
 }
