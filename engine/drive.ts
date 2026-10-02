@@ -17,6 +17,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { type ClaimTicketOutcome, claimTicket } from "./claim.ts";
+import { type DriveClock, realDriveClock } from "./drive-clock.ts";
 import { escalateRun } from "./escalate.ts";
 import {
 	type MachineEffect,
@@ -81,6 +82,8 @@ export interface DriveOptions {
 	deadlineMs?: number | null;
 	/** Overrides the settle cap (durable spec: 30 seconds) — tests only. */
 	settleCapMs?: number;
+	/** Time adapter for the Run deadline and settle cap; defaults to real time. */
+	clock?: DriveClock;
 }
 
 /** The Run's wall-clock deadline (durable spec #46: two hours). */
@@ -371,6 +374,7 @@ export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 	};
 	const interruption = options.interruption ?? createInterruption();
 	const settleCapMs = options.settleCapMs ?? INTERRUPT_SETTLE_CAP_MS;
+	const clock = options.clock ?? realDriveClock;
 
 	let lock: RunLock;
 	try {
@@ -388,17 +392,13 @@ export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 	// like a signal would.
 	const deadlineMs =
 		options.deadlineMs === undefined ? RUN_DEADLINE_MS : options.deadlineMs;
-	let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+	let cancelDeadline: (() => void) | undefined;
 	if (deadlineMs !== null) {
-		const startedMs = runStartedAtMs(handle) ?? Date.now();
-		const remaining = startedMs + deadlineMs - Date.now();
-		deadlineTimer = setTimeout(
-			() => {
-				interruption.request("the Run exceeded its two-hour deadline");
-			},
-			Math.max(0, remaining),
-		);
-		deadlineTimer.unref?.();
+		const startedMs = runStartedAtMs(handle) ?? clock.now();
+		const remaining = startedMs + deadlineMs - clock.now();
+		cancelDeadline = clock.schedule(Math.max(0, remaining), () => {
+			interruption.request("the Run exceeded its two-hour deadline");
+		});
 	}
 	const requestSignal = (signal: string) =>
 		interruption.request(`interrupted by ${signal}`);
@@ -411,9 +411,10 @@ export async function driveRun(options: DriveOptions): Promise<DriveExit> {
 		return await driveLocked(handle, seams, runCycle, runReviews, io, {
 			interruption,
 			settleCapMs,
+			clock,
 		});
 	} finally {
-		clearTimeout(deadlineTimer);
+		cancelDeadline?.();
 		uninstallSignals();
 		releaseRunLock(lock, handle);
 	}
@@ -438,9 +439,10 @@ async function driveLocked(
 	interrupt: {
 		interruption: Interruption;
 		settleCapMs: number;
+		clock: DriveClock;
 	},
 ): Promise<DriveExit> {
-	const { interruption, settleCapMs } = interrupt;
+	const { interruption, settleCapMs, clock } = interrupt;
 
 	/**
 	 * Record every event through the journal; a failed append breaks the
@@ -578,16 +580,15 @@ async function driveLocked(
 					handle.ticket,
 				),
 		);
-		let settleCapTimer: ReturnType<typeof setTimeout> | undefined;
-		let notifyCap: (() => void) | null = null;
+		let cancelSettleCap: (() => void) | undefined;
+		let notifyCap: () => void = () => {};
 		const capFired = new Promise<false>((resolve) => {
 			notifyCap = () => resolve(false);
 		});
 		// Registered only for this operation's wait, removed when it ends:
 		// a settled operation never inherits the next one's settle timer.
 		const offCap = interruption.onRequest(() => {
-			settleCapTimer = setTimeout(notifyCap, settleCapMs);
-			settleCapTimer.unref?.();
+			cancelSettleCap = clock.schedule(settleCapMs, notifyCap);
 		});
 		let raced: { settled: true; outcome: OpOutcome } | { settled: false };
 		try {
@@ -599,7 +600,7 @@ async function driveLocked(
 				capFired.then((): { settled: false } => ({ settled: false })),
 			]);
 		} finally {
-			clearTimeout(settleCapTimer);
+			cancelSettleCap?.();
 			offCap();
 		}
 		const interruptedNow = interruption.reason() !== null && !interruptHandled;
