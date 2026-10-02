@@ -2,7 +2,9 @@
  * Tests for the durable start operation (ticket afk-kit #60, durable spec
  * #46): strict entry, preflight before readiness before Claim, and every
  * unsafe start refused as a durable `refused` Run that leaves no Claim and
- * no coordination side effects. L1 covers the pure pieces; L2 runs the real
+ * no coordination side effects. Safe starts now reach the Engine's Claim
+ * operation (#66); this preflight fixture presents an existing Claim there.
+ * L1 covers the pure pieces; L2 runs the real
  * command against the fixture world — a local bare remote, a stub `gh` on
  * PATH, a temp state root — with the confinement runtime faked at its port
  * (code-verify standard).
@@ -175,11 +177,23 @@ async function fixture(
 	extraRules: GhRule[] = [],
 	runtime = fakeRuntime(),
 ): Promise<Fixture> {
-	const world = await makeWorld(
-		ISSUE,
-		"Refuse unsafe Engine starts durably",
-		extraRules,
-	);
+	const world = await makeWorld(ISSUE, "Refuse unsafe Engine starts durably", [
+		...extraRules,
+		{
+			args: [
+				"issue",
+				"view",
+				String(ISSUE),
+				"--json",
+				"number,title,url,assignees,labels",
+			],
+			json: {
+				title: "Already claimed",
+				assignees: [{ login: "another-coordinator" }],
+				labels: [{ name: "ready-for-agent" }],
+			},
+		},
+	]);
 	await world.git(["remote", "set-url", "origin", GITHUB_URL]);
 	const xdg = fs.mkdtempSync(path.join(os.tmpdir(), "afk-implement-"));
 	const skills = installSkills();
@@ -224,12 +238,12 @@ function onlyRun(xdg: string): string {
 }
 
 describe("runImplement (L2)", () => {
-	test("a safe start passes preflight and readiness, records both stages, and claims nothing", async () => {
+	test("a safe start reaches Claim and durably refuses an existing Claim", async () => {
 		const runtime = fakeRuntime();
 		const f = await fixture([readinessRule(PASSING_BODY)], runtime);
 		const exit = await f.run();
 
-		expect(exit).toBe(0);
+		expect(exit).toBe(1);
 		const dir = onlyRun(f.xdg);
 
 		// The immutable brief snapshot is the body the tracker served.
@@ -246,14 +260,17 @@ describe("runImplement (L2)", () => {
 		expect(stages.map((e) => e.payload.stage)).toEqual([
 			"preflight",
 			"readiness",
+			"claim",
 		]);
-		expect(names).not.toContain(RUN_EVENT_NAMES.outcome);
+		const outcome = events.find((e) => e.name === RUN_EVENT_NAMES.outcome);
+		expect(outcome?.payload.outcome).toBe("refused");
+		expect(String(outcome?.payload.reason)).toContain("already claimed");
 
-		// Read-only tracker access: a refused-free start claims nothing.
+		// The existing Claim is refused without tracker writes.
 		const argv = f.world.argvLog().join("\n");
 		expect(argv).not.toContain("edit");
 
-		// The lock is released; the Run waits at the Claim seam.
+		// The lock is released after the terminal refusal.
 		expect(fs.existsSync(path.join(dir, "lock"))).toBe(false);
 
 		// Evidence of every check is retained under artifacts/.
@@ -383,12 +400,14 @@ describe("runImplement (L2)", () => {
 		fs.writeFileSync(path.join(f.world.checkout, "uncommitted.txt"), "wip\n");
 		const exit = await f.run();
 
-		expect(exit).toBe(0);
+		expect(exit).toBe(1);
 		const dir = onlyRun(f.xdg);
 		const { events } = readRunEvents(path.join(dir, "events.jsonl"));
 		const notice = events.find((e) => e.name === RUN_EVENT_NAMES.notice);
 		expect(String(notice?.payload.message)).toContain("dirty");
-		expect(events.some((e) => e.name === RUN_EVENT_NAMES.outcome)).toBe(false);
+		expect(
+			events.find((e) => e.name === RUN_EVENT_NAMES.outcome)?.payload.outcome,
+		).toBe("refused");
 
 		cleanupWorld(f.world);
 	});
@@ -467,15 +486,15 @@ describe("runImplement (L2)", () => {
 
 		const exit = await f.run();
 
-		// The materialized Escalation cleared the way: the start proceeds
-		// to the Claim seam instead of refusing on the prior Run.
-		expect(exit).toBe(0);
+		// Reconciliation cleared the prior Run; the new start reaches Claim
+		// and refuses the fixture's existing Claim, not the prior Run.
+		expect(exit).toBe(1);
 		// Exactly one interruption status comment was posted.
 		const comments = f.world
 			.argvLog()
 			.filter((c) => c.startsWith("issue comment"));
 		expect(comments).toHaveLength(1);
-		// The prior Run is terminal; the new Run waits at the Claim seam.
+		// Both Runs are terminal.
 		const priorOutcome = readRunEvents(prior.eventsPath).events.find(
 			(e) => e.name === RUN_EVENT_NAMES.outcome,
 		);
@@ -539,7 +558,7 @@ describe("runImplement (L2)", () => {
 		const f = await fixture([readinessRule(PASSING_BODY)]);
 		const exit = await f.run();
 
-		expect(exit).toBe(0);
+		expect(exit).toBe(1);
 		const dir = onlyRun(f.xdg);
 		const { events } = readRunEvents(path.join(dir, "events.jsonl"));
 		const recorded = events.find(
