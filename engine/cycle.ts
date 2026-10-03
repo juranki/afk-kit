@@ -23,7 +23,10 @@ import {
 	runAgentSession,
 	type SessionFactory,
 } from "./agent-runner.ts";
-import { createTaskConfinement } from "./confinement.ts";
+import {
+	createTaskConfinement,
+	IMPLEMENTER_ALLOWED_DOMAINS,
+} from "./confinement.ts";
 import type { Interruption } from "./drive.ts";
 import type { CycleOutcome, CyclePort } from "./ports.ts";
 import type { ConfinementRuntimePort } from "./preflight.ts";
@@ -46,7 +49,6 @@ import {
 const IMPLEMENTER_CAP_MS = 30 * 60 * 1000;
 
 /** What the Implementer's shell may reach: the package registry. */
-const IMPLEMENTER_ALLOWED_DOMAINS = ["registry.npmjs.org"] as const;
 
 interface CyclePortPorts {
 	/** Scripted session factory (tests); defaults to the real SDK factory. */
@@ -188,8 +190,8 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 		}
 
 		// Per-cycle confinement: the session's bash is allow-only — writes
-		// stay inside the worktree, network reaches only the package
-		// registry, and the host's git configuration is isolated so a
+		// stay inside the worktree and task scratch, network reaches only
+		// explicit dependency hosts, and Git configuration is isolated so a
 		// commit never reads (or inherits) anything of the maintainer's.
 		// All git state is worktree-local (claim creates an independent
 		// clone), so no shared-repo write surface exists to expose.
@@ -200,11 +202,6 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 				allowedDomains: [...IMPLEMENTER_ALLOWED_DOMAINS],
 			},
 			{
-				extraEnv: {
-					GIT_CONFIG_GLOBAL: "/dev/null",
-					GIT_CONFIG_SYSTEM: "/dev/null",
-					GIT_TERMINAL_PROMPT: "0",
-				},
 				...(ports.confinementRuntime === undefined
 					? {}
 					: { runtime: ports.confinementRuntime }),

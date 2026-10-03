@@ -338,6 +338,7 @@ async function gatherStartFacts(options: {
 	// Confinement capability: the sandbox runtime must initialize.
 	try {
 		const probe = await probeConfinementCapability({
+			repository: cwd,
 			runtime: ports.confinementRuntime,
 		});
 		checks.push(

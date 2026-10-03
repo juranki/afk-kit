@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -11,6 +12,14 @@ import {
 	type BashOperations,
 	createLocalBashOperations,
 } from "@earendil-works/pi-coding-agent";
+
+/** Explicit registry policy; Go cannot fall back to direct VCS access. */
+export const IMPLEMENTER_ALLOWED_DOMAINS = [
+	"registry.npmjs.org",
+	"proxy.golang.org",
+	"sum.golang.org",
+	"storage.googleapis.com",
+] as const;
 
 /** The filesystem and network channels one implementer task needs. */
 export interface TaskConfinementNeeds {
@@ -88,6 +97,36 @@ function sensitiveReadPaths(worktree: string): string[] {
 	];
 }
 
+const SAFE_GIT_ENV = {
+	GIT_CONFIG_GLOBAL: "/dev/null",
+	GIT_CONFIG_SYSTEM: "/dev/null",
+	GIT_TERMINAL_PROMPT: "0",
+};
+
+function trackedExamplePaths(worktree: string): string[] {
+	const example = path.join(worktree, ".env.example");
+	try {
+		// Never exempt symlinks, hardlink aliases or untracked files by name.
+		const stat = fs.lstatSync(example);
+		if (!stat.isFile() || stat.nlink !== 1) return [];
+		const entry = execFileSync(
+			"git",
+			["ls-files", "--stage", "--", ".env.example"],
+			{
+				cwd: worktree,
+				env: { PATH: process.env.PATH, ...SAFE_GIT_ENV },
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		);
+		return /^100(?:644|755) [0-9a-f]+ 0\t\.env\.example\n$/.test(entry)
+			? [example]
+			: [];
+	} catch {
+		return [];
+	}
+}
+
 /**
  * Compile one task's declared needs to srt's allow-only policy. Paths are
  * realpathed so a worktree symlink cannot widen the writable boundary.
@@ -111,6 +150,29 @@ export function compileConfinementConfig(
 			`Invalid confinement needs: worktree does not exist: ${needs.worktree}`,
 		);
 	}
+	const examples = trackedExamplePaths(worktree);
+	if (fs.existsSync(path.join(worktree, ".git"))) {
+		const tracked = execFileSync(
+			"git",
+			["ls-files", "-z", "--", ".env", ".env.*"],
+			{
+				cwd: worktree,
+				env: { PATH: process.env.PATH, ...SAFE_GIT_ENV },
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		)
+			.split("\0")
+			.filter(Boolean);
+		const protectedFiles = tracked.filter(
+			(entry) => !examples.includes(path.join(worktree, entry)),
+		);
+		if (protectedFiles.length > 0) {
+			throw new Error(
+				`Confinement cannot mask tracked protected file(s) without breaking Git: ${protectedFiles.join(", ")}. Remove secrets from tracking before starting a Run; only a regular tracked .env.example is exempt.`,
+			);
+		}
+	}
 	const candidate = {
 		network: {
 			allowedDomains: unique(needs.allowedDomains),
@@ -119,6 +181,7 @@ export function compileConfinementConfig(
 		},
 		filesystem: {
 			denyRead: sensitiveReadPaths(worktree),
+			allowRead: examples,
 			allowWrite: unique(
 				needs.writablePaths.map((entry) =>
 					resolveWritablePath(worktree, entry),
@@ -139,13 +202,42 @@ export function compileConfinementConfig(
 
 function confinedEnvironment(
 	parent: NodeJS.ProcessEnv | undefined,
+	scratch: string,
 ): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
 	for (const name of ENV_ALLOWLIST) {
 		const value = parent?.[name];
 		if (value !== undefined && value !== "") env[name] = value;
 	}
-	return env;
+	return {
+		...env,
+		TMPDIR: path.join(scratch, "tmp"),
+		GOTMPDIR: path.join(scratch, "tmp"),
+		GOCACHE: path.join(scratch, "go-build"),
+		GOMODCACHE: path.join(scratch, "go-mod"),
+		XDG_CACHE_HOME: path.join(scratch, "cache"),
+		XDG_CONFIG_HOME: path.join(scratch, "config"),
+		GOPATH: path.join(scratch, "go-path"),
+		GOENV: "off",
+		GOTELEMETRY: "off",
+		GOPROXY: "https://proxy.golang.org",
+		GOSUMDB: "sum.golang.org",
+		GOTOOLCHAIN: "local",
+		...SAFE_GIT_ENV,
+	};
+}
+
+function removeScratch(root: string): void {
+	// Go module directories are read-only. Never follow tool-created symlinks.
+	function makeRemovable(directory: string): void {
+		if (!fs.lstatSync(directory).isDirectory()) return;
+		fs.chmodSync(directory, 0o700);
+		for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+			if (entry.isDirectory()) makeRemovable(path.join(directory, entry.name));
+		}
+	}
+	if (fs.existsSync(root)) makeRemovable(root);
+	fs.rmSync(root, { recursive: true, force: true });
 }
 
 export type SandboxRuntimePort = Pick<
@@ -181,7 +273,29 @@ export async function createTaskConfinement(
 	const worktree = fs.realpathSync(needs.worktree);
 	const runtime = dependencies.runtime ?? SandboxManager;
 	const delegate = dependencies.delegate ?? createLocalBashOperations();
-	await runtime.initialize(config, undefined, true);
+	const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "afk-task-tools-"));
+	for (const directory of [
+		"tmp",
+		"go-build",
+		"go-mod",
+		"cache",
+		"config",
+		"go-path",
+	]) {
+		fs.mkdirSync(path.join(scratch, directory));
+	}
+	config.filesystem.allowWrite.push(scratch);
+	config.filesystem.denyWrite.push("/tmp/claude", "/private/tmp/claude");
+	try {
+		await runtime.initialize(config, undefined, true);
+	} catch (error) {
+		try {
+			await runtime.reset();
+		} finally {
+			removeScratch(scratch);
+		}
+		throw error;
+	}
 	let commandSequence = 0;
 	let disposed = false;
 
@@ -202,8 +316,11 @@ export async function createTaskConfinement(
 
 			commandSequence += 1;
 			const commandId = `afk-bash-${commandSequence}-${randomUUID()}`;
+			// srt sets its own TMPDIR in the outer wrapper. Override it inside
+			// the sandbox too, so cgo and other child tools use task-local space.
+			const tmp = path.join(scratch, "tmp").replaceAll("'", `'"'"'`);
 			const wrapped = await runtime.wrapWithSandbox(
-				command,
+				`export TMPDIR='${tmp}'; ${command}`,
 				undefined,
 				undefined,
 				options.signal,
@@ -213,7 +330,7 @@ export async function createTaskConfinement(
 			try {
 				const result = await delegate.exec(wrapped, realCwd, {
 					...options,
-					env: confinedEnvironment(options.env),
+					env: confinedEnvironment(options.env, scratch),
 					onData: (chunk) => {
 						output += chunk.toString();
 						options.onData(chunk);
@@ -238,7 +355,11 @@ export async function createTaskConfinement(
 		dispose: async () => {
 			if (disposed) return;
 			disposed = true;
-			await runtime.reset();
+			try {
+				await runtime.reset();
+			} finally {
+				removeScratch(scratch);
+			}
 		},
 	};
 }

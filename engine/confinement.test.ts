@@ -209,6 +209,44 @@ describe("task confinement at the process seam (L2)", () => {
 		expect(delegatedEnv?.BASH_ENV).toBeUndefined();
 	});
 
+	test("provides disposable tool caches and temp space outside the worktree", async () => {
+		const worktree = scratchWorktree();
+		const confinement = await createTaskConfinement(
+			{ worktree, writablePaths: ["."], allowedDomains: [] },
+			{ runtime: fakeRuntime().port },
+		);
+		let output = "";
+		try {
+			const result = await confinement.operations.exec(
+				'printf "%s\\n" "$TMPDIR" "$GOCACHE" "$GOMODCACHE"; touch "$TMPDIR/probe"; mkdir "$GOMODCACHE/readonly"; touch "$GOMODCACHE/readonly/file"; chmod 555 "$GOMODCACHE/readonly"; git config --global --list',
+				worktree,
+				{
+					env: process.env,
+					onData: (chunk) => {
+						output += chunk.toString();
+					},
+				},
+			);
+			expect(result.exitCode).toBe(0);
+			const directories = output.trim().split("\n");
+			expect(directories).toHaveLength(3);
+			for (const directory of directories) {
+				expect(directory.startsWith(`${worktree}/`)).toBe(false);
+				expect(fs.statSync(directory).isDirectory()).toBe(true);
+				expect(
+					confinement.config.filesystem.allowWrite.some((root) =>
+						directory.startsWith(`${root}/`),
+					),
+				).toBe(true);
+			}
+			await confinement.dispose();
+			for (const directory of directories)
+				expect(fs.existsSync(directory)).toBe(false);
+		} finally {
+			await confinement.dispose();
+		}
+	});
+
 	test("refuses a spawn whose cwd escapes the worktree before wrapping it", async () => {
 		const worktree = scratchWorktree();
 		const runtime = fakeRuntime();
