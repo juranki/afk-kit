@@ -1,8 +1,9 @@
 # Planning session
 
 A human-led session that turns subject matter into tickets an unattended agent can
-complete. One planning session is the only place work gets specified; its exit
-criterion, per slice, is the brief.
+complete. Wayfinder, to-spec, and to-tickets prepare Issues; triage processes Issues
+arriving from other sources. Its exit criterion is clear, bounded source intent, not
+an agent-prepared handoff or obedience to template syntax.
 
 ## Composition
 
@@ -17,21 +18,27 @@ demands:
 - **`/to-tickets`** — to break a plan or spec into tracer-bullet slices with blocking
   edges, published to the tracker.
 - **`/to-spec`** — when a design needs prose before it can be sliced.
+- **`/wayfinder`** — when the route to a destination still contains decisions.
 
 ## Exit criteria, per ticket
 
 A ticket leaves the session as `ready-for-agent` only when:
 
-1. Its brief satisfies every field of the [agent brief template](../brief-template.md),
-   including an **empty** Open questions field — proven by the readiness check, the
-   afk-kit extension tool ([ADR 0012](../adr/0012-brief-enforcement-readiness-check.md)),
-   run around applying the label: a **pre-apply run** must pass every inspection
-   except at most `triage-labels` failing as `ready-for-agent` absent; apply the
-   label, then a **confirm run** passing all inspections is the exit proof. A failed
-   confirm run sends the ticket back — remove the label, fix, run again.
+1. The discussion establishes a clear outcome, bounded scope and exclusions,
+   meaningful verifiable acceptance criteria, necessary settled decisions, and an
+   understood verification path. No meaningful product question or contradiction
+   remains. The [brief standard](../brief-template.md) is an authoring aid, not a
+   required source format.
 2. Every blocking edge is declared (native tracker dependencies where available, as in
    tenant-kit's `docs/agents/issue-tracker.md`).
 3. Labels follow the target repo's mapping of the triage states.
+
+`ready-for-agent` records preparation/triage judgment, not guaranteed acceptance by
+`afk`. Do not add a mandatory assessment-and-comment step or a pre-apply/confirm
+label gate. On invocation, the Coordinator assesses the captured discussion and
+prepares its own immutable handoff ([ADR 0016](../adr/0016-agentic-readiness-and-prepared-brief.md)).
+Known open blockers affect Claimability separately; they do not make settled intent
+ambiguous.
 
 A ticket that cannot satisfy these leaves the session honestly: `needs-info` when a
 maintainer decision is missing, `ready-for-human` when a human must implement it.

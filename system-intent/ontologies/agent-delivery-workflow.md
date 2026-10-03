@@ -23,13 +23,13 @@ the tension between delegating labor and keeping accountability human.
 | --- | --- |
 | Maintainer | The human accountable for the repository; the only person who commands work to start and who merges a change. |
 | Issue | A tracked unit of requested work in the project's issue tracker. |
-| Ticket | An issue that has been specified and sized so an unattended agent could complete it. Every ticket is an issue; the word carries readiness. |
+| Ticket | An issue whose intended outcome and scope are specified and bounded for unattended completion. Every ticket is an issue; readiness concerns meaning, not source formatting. |
 | Triage | Evaluating a new issue and assigning its category and state. |
 | Triage state | A label expressing how far an issue has progressed toward or away from being workable (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). |
 | Planning session | A human-led working session that triages, questions, and specifies work into tickets. |
-| Agent brief | The structured part of a ticket that makes it ready for an unattended agent: summary, acceptance criteria, verify commands, blocking edges, touched areas, out-of-scope, and no open questions. |
-| Ready-for-agent | The triage state of a ticket whose brief is complete and whose blockers are known. |
-| Readiness check | The check that verifies a ticket's brief against the brief template — every field present, no open questions, blockers declared — before the ticket becomes ready-for-agent and again before it is claimed. |
+| Agent brief | The agent-prepared handoff derived from settled human-owned Issue intent and repository evidence: outcome, scope, exclusions, verifiable acceptance criteria, Verify commands, dependencies, settled decisions, relevant context, and source references. Binding requirements are distinct from implementation guidance and assumptions. |
+| Ready-for-agent | The triage state recording preparation or triage's judgment that an Issue is specified for unattended work and its dependencies are understood; not a guarantee that a subsequent Readiness check accepts it. |
+| Readiness check | The assessment of captured Issue discussion and relevant repository evidence for clear, bounded, verifiable, settled intent before Claim; it produces an Agent brief or identifies missing clarity. Failure to assess is distinct from unresolved human decisions. |
 | Blocker | An open ticket that must complete before another can start. |
 | Claimable | The ready-for-agent tickets that have no open blockers and no active claim. |
 | Coordinator | A per-issue working session that carries one claimed ticket from claim to pull request on the maintainer's explicit command. |
@@ -40,6 +40,7 @@ the tension between delegating labor and keeping accountability human.
 | Implementer | The subagent that writes and verifies a ticket's change inside the worktree. |
 | Verify commands | The commands named in the agent brief whose passing defines done for the implementer. |
 | Reviewer | The subagent that examines a pull request's changes and returns a verdict. |
+| Spec Reviewer | The Reviewer that judges changes against the Agent brief's binding requirements, not its implementation recommendations. |
 | Verdict | The reviewer's structured outcome for one round: approve, or request changes with findings. |
 | Review round | One reviewer pass and the implementer's response to its findings. |
 | Pull request | The proposal to merge a ticket's branch, opened for the maintainer's review. |
@@ -54,7 +55,7 @@ erDiagram
     ISSUE ||--o| TICKET : becomes
     TICKET ||--o{ TICKET : blocks
     PLANNING_SESSION ||--o{ TICKET : produces
-    TICKET ||--o| AGENT_BRIEF : "specified by"
+    TICKET ||--o{ AGENT_BRIEF : "provides settled intent for"
     COORDINATOR ||--o| TICKET : claims
     COORDINATOR ||--o{ SUBAGENT : delegates
     TICKET |o--|| BRANCH : "carried on"
@@ -68,10 +69,18 @@ erDiagram
 
 ## Invariants
 
-- A ticket carries the ready-for-agent state only while its brief is complete and names no open questions.
-- A ticket becomes ready-for-agent only after its readiness check passes.
-- A coordinator claims a ticket only after its readiness check passes.
-- A ticket is claimable only while it has no open blockers and no active claim.
+- Ready-for-agent records a preparation or triage judgment, not an assessment execution requirement.
+- A coordinator claims a ticket only after its Readiness check produces an Agent brief.
+- An unresolved necessary product decision prevents a successful Readiness check.
+- Unavailable evidence or assessment failure never authorizes a Claim.
+- Source intent remains human-owned; an Agent brief never supplies missing product intent or silently amends Maintainer decisions.
+- Binding requirements in an Agent brief are traceable to captured source evidence.
+- Implementation guidance in an Agent brief never becomes binding merely by appearing there.
+- The Agent brief and its captured source context remain unchanged throughout the delegated work.
+- Implementer and Spec Reviewer use the same Agent brief and captured evidence.
+- Meaningful contradictions discovered after Claim cause Escalation rather than silent reinterpretation.
+- A ticket is claimable only while it is ready-for-agent, has no open blockers, and has no active claim.
+- A successful Readiness check does not replace live coordination safeguards.
 - A claimed ticket is never claimed by two coordinators at once.
 - A coordinator works on at most one ticket at a time.
 - A coordinator begins work on a ticket only at a maintainer's command.
@@ -106,8 +115,11 @@ erDiagram
   wayfinder's frontier query.
 - The workflow-state labels (`in-progress`, `in-review`) and the claim semantics are
   inferred from the maintainer's stated practice; flagged for review.
-- afk-kit issue #14 and ADR 0012 — the readiness check as the form of brief
-  enforcement (2026-09).
+- afk-kit issue #14 and ADR 0012 — historical source-template enforcement,
+  superseded by ADR 0016.
+- [Grilling: agentic readiness and the prepared implementation brief — confirmed
+  resolution](https://github.com/juranki/afk-kit/issues/82#issuecomment-5960837807)
+  and ADR 0016 — semantic readiness, human-owned intent, and prepared handoff.
 - Retired from Open questions (2026-09, after the mechanism selection, ADR 0007):
   a Claim is tracker-visible — assignment plus `in-progress`, per the issue-lifecycle
   convention's claim semantics — and the Claimable is computed on demand by a

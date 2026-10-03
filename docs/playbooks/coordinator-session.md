@@ -1,70 +1,96 @@
 # Coordinator session
 
-One session per issue ([ADR 0001](../adr/0001-per-issue-coordinators.md)). A
-coordinator carries a single claimed ticket from the maintainer's command to a pull
-request awaiting review, then stops. The maintainer runs up to three coordinator
-sessions in parallel — the cap is how many sessions they open; nothing enforces it.
+A Coordinator carries one ticket from the Maintainer's explicit command to a pull
+request awaiting human review, then stops. The current runtime is a deterministic
+Engine Run, governed by the [durable v0 specification](https://github.com/juranki/afk-kit/issues/46)
+as amended for readiness by [ADR 0016](../adr/0016-agentic-readiness-and-prepared-brief.md).
 
 ## Commands
 
-A coordinator acts only on explicit commands ([ADR 0001](../adr/0001-per-issue-coordinators.md));
-it never picks work on its own:
+- `afk implement <issue-number>` — one Issue, bare integer only.
+- `afk status [issue-number]` — observe Run state and evidence.
 
-- `implement #<n>` — run the full loop below for this issue.
-- `review PR #<n>` — run only the review leg for an existing pull request.
-- `status` — report claims, worktrees, open pull requests, and anything waiting on the
-  maintainer.
+The Engine never chooses work autonomously or merges. Attended skills handle work
+outside the ticket path. The source `skills/coordinator/SKILL.md` is an outgoing,
+unpackaged historical artifact, not the runtime contract; its broader reconciliation
+remains with [Task: reconcile the record — ADRs, ontology, AGENTS.md,
+playbooks](https://github.com/juranki/afk-kit/issues/53).
 
-## The loop
+## Before Claim
 
-For `implement #<n>`:
-
-1. **Check readiness** — run the readiness check (the afk-kit extension tool;
-   [ADR 0012](../adr/0012-brief-enforcement-readiness-check.md)). Refuse on failure:
-   report with a structured `READINESS_REFUSAL` refusal naming the failed
-   inspections, and leave one comment on the issue recording them. Do not relabel —
-   the label is corrected by the planning session or the maintainer.
-2. **Claim** — assign the issue and apply `in-progress` (the claim, per
-   [issue lifecycle](../conventions/issue-lifecycle.md)). The atomic claim re-runs
-   the readiness check and refuses — claiming nothing — if it fails
-   ([ADR 0012](../adr/0012-brief-enforcement-readiness-check.md)).
-3. **Worktree and branch** — create them per
+1. **Preflight and collection.** Validate deterministic start prerequisites. Gather
+   the Issue body, all comments, native dependencies, relevant linked Issues/decisions,
+   repository instructions, and targeted affected code/tests/docs once after
+   invocation. Follow relevant links selectively, not through an unbounded crawl.
+2. **Readiness check.** A separate package-owned read-only assessment agent evaluates
+   the captured discussion for clear outcome, bounded scope/exclusions, meaningful
+   verifiable criteria, necessary settled decisions, contradictions, understood
+   dependencies, and concrete Verify commands. It uses Engine-mediated tracker reads
+   and read-only repository access; no writes, tracker mutations, implementation, or
+   Verify execution. Limit: 15 minutes within the overall Run budget; no cycle consumed
+   and no automatic reassessment loop in v0.
+3. **Persist and validate the handoff.** Ready produces one immutable
+   [prepared Agent brief](../brief-template.md). Persist captured sources, identities,
+   repository revision, assessment output, and the brief. Validate the agent's output
+   structure deterministically, never source-author template syntax.
+4. **Claim.** Only after Ready and live coordination safeguards pass: label/state
+   checks, native open blockers, active Claim exclusion, and atomic Claim per
+   [issue lifecycle](../conventions/issue-lifecycle.md). Do not repeat semantic
+   assessment inside Claim. Create the branch/worktree per
    [branching and PRs](../conventions/branching-and-prs.md).
-4. **Implement** — delegate to an `implementer` subagent (`glm-5.3-flash`) inside the
-   worktree: local commits only, no publishing. Verify commands must pass.
-5. **Push and open the pull request** — with the brief's acceptance criteria as a
-   checklist; request the maintainer's review.
-6. **Review** — delegate to a `reviewer` subagent (`glm-5.3`) on the pushed diff.
-7. **Fix rounds** — on request-changes, send findings to a fresh implementer in the
-   same worktree; at most two automatic rounds
-   ([review and escalation](../conventions/review-and-escalation.md)).
-8. **Stop** — on approval, stop and leave the pull request for the maintainer, who
-   merges at the merge gate. On failure or exhaustion, escalate per the same
-   conventions.
 
-## Hard rules
+Read discussion as a whole: settled conclusions may emerge among suggestions and
+rejected alternatives without special endorsement wording. Invocation is the
+Maintainer's belief that intent is clear, not authority to invent missing decisions.
+Missing headings and implementation details alone are not ambiguity. Differences
+between current code and desired behavior normally describe the requested change;
+unresolved scope, infeasibility, or conflicting governing constraints refuse.
+Semantic dependency declarations must agree with native edges; disagreement refuses
+with evidence, without silently editing edges. Live blocker status remains separate.
 
-- Never starts work without a command; never claims a second ticket.
-- Never merges; never bypasses the escalation policy; never edits the brief to make a
-  failure go away.
-- The implementer never publishes; the coordinator publishes.
-- The coordinator itself writes no implementation code — that is the implementer's job.
+## Pre-Claim refusal
 
-## Failure
+- **Needs clarification:** name specific unresolved alternatives, questions, or
+  contradictions, with captured source references; no Claim.
+- **Assessment failure:** unavailable relevant evidence, budget exhaustion, timeout,
+  runtime failure, or malformed output; no Claim. Do not report tool failure as proof
+  of missing human decisions.
 
-Any repeated failure, exhausted round, or undecided blocker goes through
-[review and escalation](../conventions/review-and-escalation.md): status comment, label
-correction, worktree preserved, maintainer informed. A coordinator never silently
-abandons a ticket.
+Both are durable `refused` Runs. Readiness does not relabel the Issue or add a planning
+gate. `ready-for-agent` expresses preparation/triage judgment, not guaranteed `afk`
+acceptance. Surface known unavailable credentials/infrastructure preventing
+verification; at least one concrete Verify command must be established, but assessment
+neither runs it nor proves the baseline green.
 
-## Runtime form
+## Delivery after Ready
 
-The shipped form of this playbook is the `coordinator` skill
-([`skills/coordinator/SKILL.md`](../../skills/coordinator/SKILL.md)): it carries the
-commands, the loop's shape, the hard rules, the coordinator-side caps, the escalation
-procedure, and the stop condition as self-contained judgment text, and delegates every
-mechanical step to the toolkit's extension tools. These docs stay canonical for humans;
-the skill is their runtime form, not their replacement, and the agentic drift review in
-`bun run verify` refuses a skill that disagrees with them ([ADR
-0013](../adr/0013-coordinator-skill-carries-judgment-agentic-drift-review.md)). Edit
-this playbook first, then reconcile the skill.
+The existing v0 delivery policy is unchanged:
+
+1. Bootstrap a draft PR; keep the Ticket `in-progress`.
+2. Launch at most three fresh Implementer sessions (one launch consumes one
+   Implement–Review Cycle), confined to the Ticket worktree with local commits only.
+3. Independently execute immutable Verify commands; on success push the additive
+   candidate and run independent Standards and Spec Reviews. Both must approve.
+4. Carry failed-cycle feedback into the next fresh Implementer; meaningful
+   contradictions Escalate immediately rather than silently redefining intent.
+5. On approval, hand off the ready PR to the Maintainer at the Merge gate; on failure
+   or exhaustion, Escalate and preserve evidence and work artifacts.
+
+Implementer and Spec Reviewer share the same prepared brief and access to captured
+sources. Binding requirements remain distinct from guidance and assumptions: inspect
+changed code, validate assumptions, and justify departures from guidance with evidence.
+Spec Review cannot elevate assessor suggestions into Maintainer requirements.
+
+The captured discussion and brief persist unchanged through the Run; there is no
+later content-freshness comparison, invalidation gate, or automatic reassessment.
+Live coordination safeguards, confinement, execution limits, independent Verify,
+existing Reviewer machinery, and the human Merge gate remain intact. The
+[durable v0 specification](https://github.com/juranki/afk-kit/issues/46) owns cycle,
+Review, interruption, handoff, and Escalation details pending broader reconciliation.
+
+## Implementation status
+
+This is the confirmed contract, not a claim that semantic assessment already ships.
+The current body-template runtime is replaced by [Task: implement and verify agentic
+readiness and prepared briefs](https://github.com/juranki/afk-kit/issues/84). See
+[implementation seams](../requirements/agentic-readiness-implementation.md).

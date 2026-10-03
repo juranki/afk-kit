@@ -11,7 +11,7 @@ below assume GitHub; per-repo mappings live in each repo (tenant-kit:
 | --- | --- | --- | --- |
 | Needs triage | `needs-triage` | triage | Maintainer must evaluate. |
 | Needs info | `needs-info` | triage, coordinator (escalation) | Waiting on a maintainer decision. |
-| Ready for agent | `ready-for-agent` | planning session | Brief complete, blockers known (see the [brief template](../brief-template.md)). |
+| Ready for agent | `ready-for-agent` | preparation, triage | Judgment that intent is specified for unattended work and dependencies understood; not guaranteed `afk` acceptance (see the [brief standard](../brief-template.md)). |
 | Ready for human | `ready-for-human` | planning session | A human must implement it. |
 | Won't fix | `wontfix` | maintainer | Will not be actioned. |
 | In progress | `in-progress` | coordinator (claim) | Claimed and being implemented. |
@@ -42,14 +42,32 @@ in-progress | in-review ──escalation──▶ needs-info | ready-for-agent
 - Only a coordinator claims, and only from the claimable, and only on a
   maintainer's command.
 
+## Readiness and live Claim safeguards
+
+Preparation and triage set `ready-for-agent` without a mandatory assessment/comment
+or two-pass label gate. On invocation, a successful semantic Readiness check produces
+an immutable prepared brief before Claim. Needs clarification and assessment failure
+are distinct diagnostics; neither permits Claim or automatically corrects labels.
+Captured discussion is collected once, with no later content-freshness gate or
+reassessment. Live label/state checks, active Claim exclusion, native blocker status,
+and atomic Claim remain separate and deterministic.
+
 ## Claim and publish refusals
+
+This section records the legacy coordinator-operation surface; broad pivot
+reconciliation remains with [Task: reconcile the record — ADRs, ontology, AGENTS.md,
+playbooks](https://github.com/juranki/afk-kit/issues/53). It does not reinstate
+ADR 0012's embedded assessment or planning gates.
 
 The claim and publish ops (the coordinator mechanics extension) enforce these
 semantics as code; their refusals use the house marker pattern. Canonical
 marker vocabulary:
 
-- `READINESS_REFUSAL` — the embedded readiness check failed; the claim refuses,
-  claiming nothing ([ADR 0012](../adr/0012-brief-enforcement-readiness-check.md)).
+- `READINESS_REFUSAL` — historical body-template refusal marker. Current readiness
+  policy is [ADR 0016](../adr/0016-agentic-readiness-and-prepared-brief.md): assessment
+  precedes Claim, distinguishing Needs clarification from assessment failure; both
+  refuse without Claim. Output/diagnostic implementation follows the readiness
+  successor, not this legacy marker description.
 - `CLAIM_REFUSAL` — the issue is already claimed (an assignee, or a leftover
   `in-progress` marker with no assignee), a competing claim appeared mid-claim, a
   step failed, or compensation itself failed. Compensation failures name the
@@ -100,7 +118,7 @@ the claim and publish ops, with two refinements:
 
 ## Who may move what
 
-- Planning sessions set triage states.
+- Preparation and triage set triage states.
 - Coordinators move only their own claimed ticket through `in-progress` / `in-review`
   and back, per the [escalation policy](review-and-escalation.md).
 - The maintainer may override any state at any time; coordinators flag unusual
