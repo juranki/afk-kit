@@ -127,7 +127,11 @@ back to an earlier Ready draft. The validator now accepts one owned artifact wit
 only declared fields; binding rendering projects explicit known fields. Bare JSON
 and one fenced artifact remain supported. Prompt tests also pin completion and
 source-reference rules after the evidence packet (file inventories are navigation,
-not captured content). These final deltas receive a separate parallel review.
+not captured content). The final delta `f590869...648de09` separately received approval from both fresh
+read-only reviewers. Standards reported no hard breaches (three non-blocking
+heuristics); Spec reported no missing requirements or scope creep, with an
+informational fail-closed boundary for triple-backtick strings inside fenced JSON.
+No blocking findings remain.
 
 ## Final live confirmations
 
