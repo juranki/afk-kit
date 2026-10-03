@@ -58,6 +58,45 @@ test("read budgets and unavailable relevant sources fail closed and never author
 	}
 });
 
+test("a failed later comment page preserves previously gathered tracker evidence", async () => {
+	const w = await makeWorld(84, "Readiness", [
+		{
+			args: ["api", "repos/o/r/issues/84/comments?per_page=100&page=1"],
+			json: Array.from({ length: 100 }, (_, i) => ({
+				id: i + 1,
+				body: "Captured before failure",
+			})),
+		},
+		{
+			args: ["api", "repos/o/r/issues/84/comments?per_page=100&page=2"],
+			status: 4,
+		},
+	]);
+	try {
+		const directory = path.join(w.root, "evidence");
+		await expect(
+			collectEvidence({
+				ticket: 84,
+				repository: "o/r",
+				revision: w.originMainSha,
+				cwd: w.checkout,
+				input: { body: "Request", labels: [], nativeBlockers: [] },
+				gh: w.seams.gh,
+				git: w.seams.git,
+				directory,
+			}),
+		).rejects.toThrow("unavailable-evidence");
+		const receipts = fs.readFileSync(
+			path.join(directory, "tracker-responses.jsonl"),
+			"utf8",
+		);
+		expect(receipts).toContain("Captured before failure");
+		expect(receipts).toContain("per_page=100&page=1");
+	} finally {
+		cleanupWorld(w);
+	}
+});
+
 test("captures explicitly linked decision comments and native dependencies before assessment", async () => {
 	const w = await makeWorld(84, "Readiness", [
 		{

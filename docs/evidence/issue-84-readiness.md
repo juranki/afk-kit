@@ -12,6 +12,8 @@ Observed red tests before their passing implementations:
   handoff validation, malformed/unreferenced output refusal and dependency discrepancies.
 - `engine/evidence.test.ts`: no collection module; later the explicit linked-decision/native
   dependency test failed until first-hop decision/prerequisite collection was implemented.
+  A later-page failure test also exposed lost earlier comment pages; bounded tracker
+  response receipts now retain gathered pages and identities before any later failure.
 - `engine/implement.test.ts`: a non-template request stopped at readiness instead of
   reaching live Claim; now comments establish a separate prepared brief before Claim.
 - `engine/assessment.test.ts`: delayed reads changed the snapshot after timeout; now
@@ -27,6 +29,8 @@ Observed red tests before their passing implementations:
   brief/evidence and explicitly keep guidance non-binding and later contradictions Escalated.
 - `engine/cycle.test.ts`: Verify ignored structured commands; now established commands
   execute verbatim, including shell backticks, independently of Markdown projections.
+  A declared binding-intent contradiction formerly retried three cycles; it now returns
+  the existing `escalate` Cycle outcome immediately, preserving ordinary failure/cap policy.
 - `engine/config.test.ts`: assessor implementation capabilities passed preflight; now the
   role/model/thinking/tool pins are checked and only `read_evidence` is allowed.
 - `extensions/readiness/gh.test.ts`: truncated edges were incomplete and cancellation
@@ -89,7 +93,8 @@ Assessment (including collection/session creation) has a 15-minute maximum, addi
 bounded by the remaining Run deadline; timeout cancels tracker/repository reads and
 aborts the session, without Claim or implementation-cycle consumption.
 
-Canonical `bun run verify`: **PASS** — 404 tests across 33 files, 1,441 assertions;
+Canonical `bun run verify`: **PASS** — final sweep: 406 tests across 33 files,
+1,447 assertions; the initial complete sweep passed 404 tests / 1,441 assertions;
 Biome checked 75 files; Knip passed; the change-gated drift reviewer agreed and
 refreshed `scripts/drift-corpus.sha256`. The first full invocation hit the harness's
 120-second command limit while the model-backed drift review was still running;
@@ -101,3 +106,15 @@ errors already exist (missing types, strict nullability, confinement/SDK signatu
 No new assessment/collection/validator errors remain; the runner's stale spawn type,
 missing definition body, and optional assistant-text mismatch were corrected. These
 baseline diagnostics are not hidden as a successful repository-wide typecheck.
+The final ad-hoc transitive check reported 35 diagnostics versus 41 on clean `main`.
+
+## Independent code review
+
+Fixed point: `43dd670ef1694116819c65129c9f4c7b4e6ede63` (origin/main).
+Separate fresh read-only Standards and Spec subagent sessions reviewed the complete
+branch diff in parallel on `zai/glm-5.3`, high thinking. Both approved, with no blocking
+findings. Standards identified a stale confinement-smoke anchor (fixed) and non-blocking
+refactoring heuristics; Spec identified an artifact reference that could name an absent
+source file on early budget refusal (fixed by referencing the existing stage directory).
+Review-stage tests additionally hardened partial-page evidence retention and explicit
+post-Claim contradiction Escalation. A final pass reviews those deltas before PR handoff.

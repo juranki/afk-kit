@@ -337,6 +337,25 @@ async function runDrivenWorld(
 	return { exit, started, events, stderr: stderrLines.join("") };
 }
 
+test("a declared meaningful intent contradiction Escalates immediately without another implementation cycle", async () => {
+	const result = await runDrivenWorld({
+		report: JSON.stringify({
+			status: "escalate",
+			summary: "Binding scope contradicts the captured decision",
+			openQuestions: ["Which requirement is authoritative?"],
+		}),
+	});
+	try {
+		expect(result.exit).toBe(2);
+		expect(result.started.launched).toHaveLength(1);
+		expect(result.stderr).toContain(
+			"Binding scope contradicts the captured decision",
+		);
+	} finally {
+		cleanupWorld(result.started.world);
+	}
+});
+
 test("Engine Verify executes the structured prepared commands verbatim, including shell backticks", async () => {
 	const command = 'test "`printf captured`" = captured';
 	const result = await runDrivenWorld({

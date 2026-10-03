@@ -42,7 +42,7 @@ never the code:
   [R5 confinement prototype](../../prototype/r5-confinement/) proved).
 - **srt** — a fake manager at the library port records the compiled task policy and
   returns the command to a real shell subprocess. The separate
-  [`bun run confinement:smoke`](package-verify.md#4-confinement-pin-smoke) upgrade gate
+  [`bun run confinement:smoke`](package-verify.md#5-confinement-pin-smoke) upgrade gate
   runs the pinned srt artifact against the live host and network.
 
 This exercises the real command surface, which is exactly the thing that

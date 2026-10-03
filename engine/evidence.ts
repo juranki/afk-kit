@@ -41,6 +41,7 @@ export async function collectEvidence(
 	const sources: CapturedSource[] = [];
 	const failures: string[] = [];
 	let bytes = 0;
+	let receiptBytes = 0;
 	const pending = new Map<string, Promise<CapturedSource>>();
 	const snapshot: EvidenceSnapshot = {
 		revision,
@@ -75,6 +76,27 @@ export async function collectEvidence(
 	};
 	const json = async (endpoint: string): Promise<unknown> => {
 		const r = await gh(["api", endpoint], options.signal);
+		if (!active()) throw new Error("assessment closed");
+		// Preserve every gathered page even when a subsequent read fails;
+		// the final source snapshot remains a complete-discussion artifact.
+		const receipt = JSON.stringify({
+			identity: `https://api.github.com/${endpoint}`,
+			...r,
+		});
+		receiptBytes += Buffer.byteLength(receipt);
+		if (receiptBytes > (options.maxBytes ?? 2_000_000)) {
+			fs.appendFileSync(
+				path.join(directory, "tracker-responses.jsonl"),
+				`${JSON.stringify({ identity: `https://api.github.com/${endpoint}`, captured: false, reason: "source-budget-exhausted", bytes: Buffer.byteLength(r.stdout) })}\n`,
+				{ mode: 0o600 },
+			);
+			throw new Error("source-budget-exhausted: tracker receipts");
+		}
+		fs.appendFileSync(
+			path.join(directory, "tracker-responses.jsonl"),
+			`${receipt}\n`,
+			{ mode: 0o600 },
+		);
 		if (r.exitCode !== 0)
 			throw new Error(`unavailable-evidence: ${endpoint}: ${r.stderr}`);
 		return JSON.parse(r.stdout);

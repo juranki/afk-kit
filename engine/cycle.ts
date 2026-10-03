@@ -283,6 +283,15 @@ export function createCyclePort(deps: CyclePortDeps): CyclePort {
 				{ mode: 0o600 },
 			);
 
+			// Human-owned intent cannot be repaired by another implementation attempt.
+			// The explicit signal preserves ordinary failed-cycle policy unchanged.
+			if (parsed.ok && parsed.result.status === "escalate") {
+				return {
+					status: "escalate",
+					cycle,
+					reason: `Implementer requested Escalation: ${parsed.result.summary ?? "meaningful contradiction"}; ${parsed.result.openQuestions.join("; ")}`,
+				};
+			}
 			const failure = judgeCycleFailure(cycle, evidence);
 			if (failure !== null) {
 				return { status: "failed", cycle, reason: failure };

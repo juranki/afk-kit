@@ -487,10 +487,11 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 			if (failed.length > 0) return refuseRun(handle, io, "preflight", failed);
 
 			// ADR 0016: capture once; the assessor prepares a separate handoff.
+			const readinessDirectory = artifactDir(handle, "readiness");
 			recordEvent(handle, {
 				name: RUN_EVENT_NAMES.stageEntered,
 				payload: { stage: "readiness" },
-				artifacts: ["readiness/sources.json", "readiness/assessment.json"],
+				artifacts: ["readiness"],
 			});
 			const started = readRunEvents(handle.eventsPath).events[0]?.ts;
 			const remaining =
@@ -509,7 +510,7 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 				input: facts.readinessInput,
 				gh,
 				git,
-				directory: artifactDir(handle, "readiness"),
+				directory: readinessDirectory,
 				capMs: Math.min(
 					ports.assessment?.capMs ?? ASSESSMENT_CAP_MS,
 					remaining,

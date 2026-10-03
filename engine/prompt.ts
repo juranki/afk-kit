@@ -149,7 +149,7 @@ export function buildImplementerPrompt(facts: ImplementerPromptFacts): string {
 		"",
 		"- Commit only inside this worktree, on this branch, locally. Never push, never open or comment on pull requests, never write to the issue tracker.",
 		"- Prepared binding requirements and captured evidence are the shared contract with Spec Review; guidance is non-binding, including suggested touch points. Inspect changed code and validate assumptions; departures from guidance need evidence, not permission to amend requirements.",
-		"- Stop and report blocked on meaningful contradictions discovered later; the Engine must Escalate rather than silently reinterpret intent.",
+		"- Report status escalate on meaningful contradictions discovered later; the Engine must Escalate immediately rather than silently reinterpret intent or try another implementation cycle.",
 		"- Follow the target repository's test-first standard when it has one.",
 		"- Every verify command from the brief must pass before you report done.",
 		"- If you cannot proceed — conflicting guidance, missing context, an unsafe step — stop and report blocked instead of guessing.",
@@ -162,7 +162,7 @@ export function buildImplementerPrompt(facts: ImplementerPromptFacts): string {
 		'{ "status": "done", "summary": "what changed, one line", "openQuestions": [] }',
 		"```",
 		"",
-		'- `"status"` is `"done"` only when you made at least one commit, the worktree is clean, and every verify command passed. Use `"blocked"` otherwise.',
+		'- `"status"` is `"done"` only when you made at least one commit, the worktree is clean, and every verify command passed. Use `"escalate"` for meaningful binding-intent contradictions requiring a Maintainer decision, and `"blocked"` for other failure.',
 		'- `"openQuestions"` lists what a human must answer before work can continue; it must be empty when status is `"done"`.',
 		"- Observed facts (Git, exit codes) decide, never your prose — a report cannot make a failing command pass.",
 	);

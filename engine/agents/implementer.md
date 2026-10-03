@@ -38,8 +38,10 @@ End-of-run report (required): end your final message with one fenced
 ```
 
 - `"status"` is `"done"` only when you made at least one commit, the
-  worktree is clean, and every verify command passed. Use `"blocked"`
-  otherwise.
+  worktree is clean, and every verify command passed. Use `"escalate"` for
+  meaningful contradictions in binding intent requiring a Maintainer decision;
+  the Engine immediately Escalates without another implementation attempt. Use
+  `"blocked"` for other failures.
 - `"openQuestions"` lists what a human must answer before work can
   continue; it must be empty when status is `"done"`.
 - Observed facts (Git, exit codes) decide, never your prose — a report
