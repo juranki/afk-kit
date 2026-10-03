@@ -178,6 +178,7 @@ interface Fixture {
 	out: string[];
 	err: string[];
 	runtime: ReturnType<typeof fakeRuntime>;
+	assessmentSessions: number;
 	/** The hermetic installed-skills root and its content hashes. */
 	skills: { root: string; sha256: Record<string, string> };
 	run: (options?: RunOptions) => Promise<number>;
@@ -189,6 +190,12 @@ async function fixture(
 ): Promise<Fixture> {
 	const world = await makeWorld(ISSUE, "Refuse unsafe Engine starts durably", [
 		...extraRules,
+		{
+			args: ["api", "repos/juranki/afk-kit/labels?per_page=100&page=1"],
+			json: ["in-progress", "in-review", "needs-info"].map((name) => ({
+				name,
+			})),
+		},
 		{
 			args: [
 				"api",
@@ -222,7 +229,8 @@ async function fixture(
 	const skills = installSkills();
 	const out: string[] = [];
 	const err: string[] = [];
-	return {
+	const f: Fixture = {
+		assessmentSessions: 0,
 		world,
 		xdg,
 		out,
@@ -244,55 +252,62 @@ async function fixture(
 					config: { skillsRoot: skills.root, ...options.config },
 					assessment: {
 						capMs: options.assessmentCapMs,
-						sessionFactory: async () => ({
-							subscribe: () => () => {},
-							prompt: async () => {},
-							abort: () => {},
-							dispose: () => {},
-							getLastAssistantText: () =>
-								options.assessmentOutput ??
-								JSON.stringify(
-									readyAssessmentFor(
-										["issue:juranki/afk-kit#60", "comments:juranki/afk-kit#60"],
-										{
-											command: "bun test",
-											verifies: "Requested behavior",
-											refs: ["comments:juranki/afk-kit#60"],
-										},
-										{
-											intent: {
-												text: "Carry the settled intent",
+						sessionFactory: async () => {
+							f.assessmentSessions += 1;
+							return {
+								subscribe: () => () => {},
+								prompt: async () => {},
+								abort: () => {},
+								dispose: () => {},
+								getLastAssistantText: () =>
+									options.assessmentOutput ??
+									JSON.stringify(
+										readyAssessmentFor(
+											[
+												"issue:juranki/afk-kit#60",
+												"comments:juranki/afk-kit#60",
+											],
+											{
+												command: "bun test",
+												verifies: "Requested behavior",
 												refs: ["comments:juranki/afk-kit#60"],
 											},
-											scope: [
-												{
-													text: "Bounded change",
-													refs: ["issue:juranki/afk-kit#60"],
-												},
-											],
-											exclusions: [
-												{
-													text: "Unrelated work",
-													refs: ["issue:juranki/afk-kit#60"],
-												},
-											],
-											acceptanceCriteria: [
-												{
-													text: "Settled behavior works",
+											{
+												intent: {
+													text: "Carry the settled intent",
 													refs: ["comments:juranki/afk-kit#60"],
 												},
-											],
-											decisions: [],
-											repositoryContext: [],
-											guidance: [],
-										},
+												scope: [
+													{
+														text: "Bounded change",
+														refs: ["issue:juranki/afk-kit#60"],
+													},
+												],
+												exclusions: [
+													{
+														text: "Unrelated work",
+														refs: ["issue:juranki/afk-kit#60"],
+													},
+												],
+												acceptanceCriteria: [
+													{
+														text: "Settled behavior works",
+														refs: ["comments:juranki/afk-kit#60"],
+													},
+												],
+												decisions: [],
+												repositoryContext: [],
+												guidance: [],
+											},
+										),
 									),
-								),
-						}),
+							};
+						},
 					},
 				},
 			}),
 	};
+	return f;
 }
 
 function runsDir(xdg: string): string {
@@ -309,6 +324,114 @@ function onlyRun(xdg: string): string {
 }
 
 describe("runImplement (L2)", () => {
+	test("missing repository labels refuse before Readiness or Claim with all remediation commands", async () => {
+		const f = await fixture([
+			readinessRule(PASSING_BODY),
+			{
+				args: ["api", "repos/juranki/afk-kit/labels?per_page=100&page=1"],
+				json: [{ name: "ready-for-agent" }, { name: "needs-info" }],
+			},
+		]);
+		try {
+			expect(await f.run()).toBe(1);
+			const dir = onlyRun(f.xdg);
+			const events = readRunEvents(path.join(dir, "events.jsonl")).events;
+			expect(
+				events
+					.filter((e) => e.name === RUN_EVENT_NAMES.stageEntered)
+					.map((e) => e.payload.stage),
+			).toEqual(["preflight"]);
+			const reason = String(
+				events.find((e) => e.name === RUN_EVENT_NAMES.outcome)?.payload.reason,
+			);
+			expect(reason).toContain("repository-labels");
+			const diagnostic = f.err.join("");
+			expect(diagnostic).toContain(
+				"missing repository labels: in-progress, in-review",
+			);
+			expect(diagnostic).toContain('gh label create "in-progress"');
+			expect(diagnostic).toContain('gh label create "in-review"');
+			expect(f.assessmentSessions).toBe(0);
+			expect(fs.existsSync(path.join(dir, "artifacts/readiness"))).toBe(false);
+			expect(f.world.argvLog().join("\n")).not.toContain("edit");
+			expect(f.world.argvLog().join("\n")).not.toContain("label create");
+		} finally {
+			cleanupWorld(f.world);
+		}
+	});
+	test.each(["in-progress", "in-review", "needs-info"])(
+		"missing %s refuses before semantic Readiness",
+		async (missing) => {
+			const f = await fixture([
+				readinessRule(PASSING_BODY),
+				{
+					args: ["api", "repos/juranki/afk-kit/labels?per_page=100&page=1"],
+					json: ["in-progress", "in-review", "needs-info"]
+						.filter((name) => name !== missing)
+						.map((name) => ({ name })),
+				},
+			]);
+			try {
+				expect(await f.run()).toBe(1);
+				expect(f.err.join("")).toContain(
+					`missing repository labels: ${missing}.`,
+				);
+				expect(f.assessmentSessions).toBe(0);
+				expect(f.world.argvLog().join("\n")).not.toContain("edit");
+			} finally {
+				cleanupWorld(f.world);
+			}
+		},
+	);
+
+	test("repository labels are collected beyond the first page", async () => {
+		const f = await fixture([
+			readinessRule(PASSING_BODY),
+			{
+				args: ["api", "repos/juranki/afk-kit/labels?per_page=100&page=1"],
+				json: Array.from({ length: 100 }, (_, i) => ({
+					name: `unrelated-${i}`,
+				})),
+			},
+			{
+				args: ["api", "repos/juranki/afk-kit/labels?per_page=100&page=2"],
+				json: ["in-progress", "in-review", "needs-info"].map((name) => ({
+					name,
+				})),
+			},
+		]);
+		try {
+			expect(await f.run()).toBe(1); // Existing Claim is the fixture's final refusal.
+			expect(f.assessmentSessions).toBe(1);
+			expect(f.err.join("")).not.toContain("repository-labels");
+		} finally {
+			cleanupWorld(f.world);
+		}
+	});
+
+	test.each(["unavailable", "malformed"])(
+		"%s repository labels refuse without assessment",
+		async (failure) => {
+			const f = await fixture([
+				readinessRule(PASSING_BODY),
+				{
+					args: ["api", "repos/juranki/afk-kit/labels?per_page=100&page=1"],
+					...(failure === "unavailable"
+						? { status: 1, stderr: "permission denied" }
+						: { json: {} }),
+				},
+			]);
+			try {
+				expect(await f.run()).toBe(1);
+				expect(f.err.join("")).toContain("repository-labels");
+				expect(f.assessmentSessions).toBe(0);
+				expect(f.world.argvLog().join("\n")).not.toContain("edit");
+			} finally {
+				cleanupWorld(f.world);
+			}
+		},
+	);
+
 	test("a narrow Issue with 70 unrelated instruction directories prepares a brief before live Claim", async () => {
 		const f = await fixture([
 			readinessRule("Please carry the change discussed below."),

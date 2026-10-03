@@ -17,13 +17,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type GitRunner, runGit } from "../extensions/coordinator/git.ts";
-import { checkTriageLabels } from "../extensions/readiness/check.ts";
+import {
+	checkRepositoryLabels,
+	checkTriageLabels,
+} from "../extensions/readiness/check.ts";
 import {
 	fetchReadinessInput,
 	type GhRunner,
 	type ReadinessInput,
 	runGh,
 } from "../extensions/readiness/gh.ts";
+import { collectTrackerPages } from "../extensions/readiness/pagination.ts";
 import type { SessionFactory } from "./agent-runner.ts";
 import { ASSESSMENT_CAP_MS, assessReadiness } from "./assessment.ts";
 import {
@@ -201,6 +205,23 @@ async function gatherStartFacts(options: {
 	} else {
 		const inspection = checkTriageLabels(facts.readinessInput.labels);
 		checks.push({ ...inspection, name: "required-labels" });
+	}
+
+	// Repository labels AFK will apply later; read only, never provision them.
+	try {
+		const labels = await collectTrackerPages<{ name: string }>({
+			readPage: (page) =>
+				jsonOf<unknown>(
+					gh,
+					["api", `repos/${owner}/${repo}/labels?per_page=100&page=${page}`],
+					"repository labels",
+				),
+			malformed: "malformed repository labels response",
+			exhausted: "repository label pagination exhausted",
+		});
+		checks.push(checkRepositoryLabels(labels.map((label) => label.name)));
+	} catch (error) {
+		checks.push(fail("repository-labels", messageOf(error)));
 	}
 
 	// Fresh origin/main: fetch and resolve, never local main.

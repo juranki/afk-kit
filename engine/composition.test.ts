@@ -54,6 +54,12 @@ function session(
 function rules(draftExists = false): GhRule[] {
 	return [
 		{
+			args: ["api", "repos/test/remote/labels?per_page=100&page=1"],
+			json: ["in-progress", "in-review", "needs-info"].map((name) => ({
+				name,
+			})),
+		},
+		{
 			args: ["api", "repos/test/remote/issues/66/comments?per_page=100&page=1"],
 			json: [
 				{

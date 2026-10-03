@@ -47,6 +47,13 @@ linted with Biome, dead-code-checked with Knip. POSIX-only.
 carry judgment. The current [pivot map](https://github.com/juranki/afk-kit/issues/43)
 is moving orchestration into a traceable coordinator engine on a guard-rail stack.
 
+## Target repository setup
+
+Pocock / Wayfinder setup alone does not provision AFK workflow labels. Before
+`afk implement`, ensure `in-progress`, `in-review`, and `needs-info` exist; see the
+[label setup commands](docs/conventions/issue-lifecycle.md#target-repository-setup).
+Preflight reports all missing labels without creating or changing them.
+
 ## Status
 
 **Pivot in progress.** The SDK-driven Engine CLI is implemented; its real proof Run
