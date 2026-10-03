@@ -58,7 +58,15 @@ export function captureConfinementPolicy(
 ): ConfinementPolicy {
 	const body = readPublicRepositoryFile(repository, ".afk/confinement.json");
 	if (body === null) return CLOSED_CONFINEMENT_POLICY;
-	const value: unknown = JSON.parse(body.toString("utf8"));
+	return parseConfinementPolicy(JSON.parse(body.toString("utf8")));
+}
+
+export function isNonSecretExampleName(file: string): boolean {
+	return /^\.env\.[a-zA-Z0-9_-]+$/.test(file);
+}
+
+/** Pure declaration validation, separate from capture's filesystem boundary. */
+export function parseConfinementPolicy(value: unknown): ConfinementPolicy {
 	if (!value || typeof value !== "object" || Array.isArray(value))
 		throw new Error("Invalid confinement declaration: expected an object");
 	const record = value as Record<string, unknown>;
@@ -85,7 +93,7 @@ export function captureConfinementPolicy(
 		throw new Error(
 			"Invalid confinement declaration: dependencyHosts must select exact supported public registry hosts",
 		);
-	if (nonSecretExamples.some((file) => !/^\.env\.[a-zA-Z0-9_-]+$/.test(file)))
+	if (nonSecretExamples.some((file) => !isNonSecretExampleName(file)))
 		throw new Error(
 			"Invalid confinement declaration: examples must be root .env.* filenames, never .env or escaping paths",
 		);

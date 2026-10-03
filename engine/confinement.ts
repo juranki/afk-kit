@@ -12,6 +12,7 @@ import {
 	type BashOperations,
 	createLocalBashOperations,
 } from "@earendil-works/pi-coding-agent";
+import { isNonSecretExampleName } from "./confinement-policy.ts";
 
 /** The filesystem and network channels one implementer task needs. */
 export interface TaskConfinementNeeds {
@@ -121,7 +122,7 @@ function declaredExamplePaths(
 	declarations: readonly string[],
 ): string[] {
 	return unique([...declarations]).map((file) => {
-		if (!/^\.env\.[a-zA-Z0-9_-]+$/.test(file))
+		if (!isNonSecretExampleName(file))
 			throw new Error(`Invalid non-secret example declaration: ${file}`);
 		const example = path.join(worktree, file);
 		const stat = fs.lstatSync(example);

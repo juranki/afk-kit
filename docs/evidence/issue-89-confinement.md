@@ -56,5 +56,5 @@ Focused TypeScript checking of confinement, policy, Preflight and the smoke pass
 The repository has no canonical typecheck command; broad checking also encounters
 existing errors in unrelated agent-runner, drive and Verify code. Deterministic
 verification remains `bun install && bun run verify`, separate from this live proof.
-Final `bun run verify`: 438 tests passed, zero failures; Biome, knip and documentation
+Final `bun run verify`: 461 tests passed, zero failures; Biome, knip and documentation
 drift verification passed.
