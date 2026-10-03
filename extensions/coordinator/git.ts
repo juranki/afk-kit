@@ -8,12 +8,22 @@
 
 import { spawn } from "node:child_process";
 
-export type GitRunner = (args: string[], cwd: string) => Promise<GitResult>;
+export interface GitResult {
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+}
+
+export type GitRunner = (
+	args: string[],
+	cwd: string,
+	signal?: AbortSignal,
+) => Promise<GitResult>;
 
 export function runGit(): GitRunner {
-	return (args, cwd) =>
+	return (args, cwd, signal) =>
 		new Promise((resolve) => {
-			const child = spawn("git", args, { cwd });
+			const child = spawn("git", args, { cwd, signal });
 			let stdout = "";
 			let stderr = "";
 			child.stdout.on("data", (chunk) => {

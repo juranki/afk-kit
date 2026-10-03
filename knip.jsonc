@@ -5,7 +5,6 @@
 	// devDependencies so bun test can resolve the module graph).
 	"$schema": "./node_modules/knip/schema.json",
 	"entry": [
-		"extensions/readiness/index.ts",
 		"scripts/**/*.test.ts",
 		"engine/**/*.test.ts",
 		"extensions/readiness/**/*.test.ts",

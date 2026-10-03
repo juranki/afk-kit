@@ -27,8 +27,8 @@ mkdir -p /tmp/afk-kit-demo && cd /tmp/afk-kit-demo
 pi -p --no-session "Reply with exactly: LOAD-OK"   # stderr must stay empty, exit 0
 ```
 
-Expected: the remaining package extensions load cleanly, with no warnings or trust
-interaction, and the reply is `LOAD-OK`.
+Expected: the Engine-only package registers no prompt-facing extensions or skills,
+produces no warnings or trust interaction, and the reply is `LOAD-OK`.
 
 ## 3. Retired subagent surfaces stay absent
 
@@ -40,7 +40,22 @@ bun test package.test.ts
 Expected: the package manifest registers neither the retired `subagent` extension nor
 its prompts, and `extensions/subagent/` does not exist.
 
-## 4. Confinement pin smoke
+## 4. Readiness session smoke
+
+```bash
+bun run readiness:smoke --fixtures
+bun run readiness:smoke 84
+```
+
+Requires real model credentials for the package-owned assessor pin. Fixtures prove a
+non-template request settled in comments accepts historical alternatives and requested
+code/test changes, while unresolved choices and missing dependency edges refuse. The
+Issue-number form reads the real tracker and captured repository revision. Both retain
+assessment/source/session evidence outside the repository and perform no Claim, Verify,
+implementation or tracker mutation. See [#84 evidence](../evidence/issue-84-readiness.md).
+These L3 smokes are separate from deterministic `bun run verify` and from #52's proof Run.
+
+## 5. Confinement pin smoke
 
 Run whenever the exact `@anthropic-ai/sandbox-runtime` pin changes. On Linux this
 requires `bubblewrap`, `socat`, `ripgrep`, `curl`, unprivileged user namespaces, and

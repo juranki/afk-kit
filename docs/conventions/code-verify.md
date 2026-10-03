@@ -27,7 +27,7 @@ invents its own notion of "tested".
 | --- | --- | --- |
 | **L1 Unit** | Deterministic decision logic — readiness parsing, branch naming, pull-request shaping, and package resources | `bun test` — offline, no git, no network |
 | **L2 Seam-integration** | Coordinator mechanics (claim + worktree + branch, push + PR) and confinement spawn wrapping against faked seams | `bun test` with real subprocesses: `git` against a local bare repo, a stubbed `gh` on `PATH`, and a fake srt manager at its library port |
-| **L3 Live smoke** | Runtime integration that requires a real pi process | No current command; the retired vendored-dispatch smoke was removed with ticket #41 |
+| **L3 Live smoke** | Runtime integration that requires a real pi session/model | `bun run readiness:smoke --fixtures` and `bun run readiness:smoke <issue-number>` exercise the package-owned read-only assessor; no Claim or implementation |
 | **L4 Proof run** | The only true end-to-end | ticket [#21](https://github.com/juranki/afk-kit/issues/21) — a real ticket carried from `implement #n` to a human-merged pull request |
 
 ## Faking the seams (L2)
@@ -42,7 +42,7 @@ never the code:
   [R5 confinement prototype](../../prototype/r5-confinement/) proved).
 - **srt** — a fake manager at the library port records the compiled task policy and
   returns the command to a real shell subprocess. The separate
-  [`bun run confinement:smoke`](package-verify.md#4-confinement-pin-smoke) upgrade gate
+  [`bun run confinement:smoke`](package-verify.md#5-confinement-pin-smoke) upgrade gate
   runs the pinned srt artifact against the live host and network.
 
 This exercises the real command surface, which is exactly the thing that

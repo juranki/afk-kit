@@ -17,6 +17,7 @@ import * as path from "node:path";
 import type {
 	BashOperations,
 	ModelRuntime,
+	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { Interruption } from "./drive.ts";
 import type { ImplementationSkill } from "./runs/events.ts";
@@ -36,7 +37,7 @@ export interface AgentSessionLike {
 	abort(): void | Promise<void>;
 	dispose(): void | Promise<void>;
 	/** The final assistant message's text, as the session saw it. */
-	getLastAssistantText(): string;
+	getLastAssistantText(): string | undefined;
 }
 
 /** Everything one session launch needs; the request is the prompt's facts. */
@@ -53,7 +54,7 @@ export interface AgentSpawnRequest {
 
 /** Builds the session for one launch; a new session every call. */
 export type SessionFactory = (
-	request: ImplementerSpawnRequest,
+	request: AgentSpawnRequest,
 ) => Promise<AgentSessionLike>;
 
 export interface AgentSpawnOutcome {
@@ -153,7 +154,7 @@ export async function runAgentSession(
 		resultText:
 			capFired || interrupted || settleCapFired
 				? ""
-				: session.getLastAssistantText(),
+				: (session.getLastAssistantText() ?? ""),
 	};
 }
 
@@ -190,7 +191,7 @@ export function parseAgentDefinition(text: string): AgentDefinition {
 	if (match === null) {
 		return { tools: [], skills: [], body: text };
 	}
-	const definition: AgentDefinition = { tools: [], skills: [] };
+	const definition: AgentDefinition = { tools: [], skills: [], body: "" };
 	for (const line of (match[1] ?? "").split("\n")) {
 		const entry = /^(\w[\w-]*):\s*(.*)$/.exec(line);
 		if (entry === null) continue;
@@ -273,6 +274,7 @@ interface DefinitionSpawnConfig {
 	modelRuntime?: ModelRuntime;
 	/** The cycle's confined bash operations; absent for read-only roles. */
 	operations?: BashOperations;
+	customTools?: ToolDefinition[];
 }
 
 function createDefinitionSessionFactory(
@@ -313,11 +315,15 @@ function createDefinitionSessionFactory(
 			noThemes: true,
 			noContextFiles: true,
 		});
+		// Supplied loaders must be loaded explicitly; otherwise the SDK uses its
+		// generic coding prompt instead of the package-owned role definition.
+		await resourceLoader.reload();
 		const { session } = await createAgentSession({
 			cwd: request.worktree,
 			model,
 			thinkingLevel: (definition.thinking as "high" | undefined) ?? "high",
 			tools: definition.tools,
+			customTools: config.customTools,
 			...(config.operations === undefined
 				? {}
 				: {
@@ -336,6 +342,22 @@ function createDefinitionSessionFactory(
 		});
 		return session;
 	};
+}
+
+/** The assessor's factory has only Engine-owned source reads, no built-in tools. */
+export function createAssessmentSessionFactory(config: {
+	readEvidence: ToolDefinition;
+	modelRuntime?: ModelRuntime;
+}): SessionFactory {
+	return createDefinitionSessionFactory({
+		definitionPath: path.join(
+			import.meta.dir,
+			"agents",
+			"readiness-assessor.md",
+		),
+		customTools: [config.readEvidence],
+		modelRuntime: config.modelRuntime,
+	});
 }
 
 /** The Implementer's factory: the confined-bash definition (ticket #62). */

@@ -134,6 +134,81 @@ function world0Sh(cwd: string, command: string): Promise<void> {
 }
 
 describe("bootstrapDraftPr", () => {
+	test("PR consumers use the captured prepared brief, not a changed Issue body", async () => {
+		const liveRules: GhRule[] = [
+			{
+				args: ["issue", "view", String(ISSUE), "--json", "title"],
+				json: { title: TITLE },
+			},
+			{
+				args: ["issue", "view", String(ISSUE), "--json", "labels"],
+				json: { labels: [{ name: "in-progress" }] },
+			},
+		];
+		const world = await makeWorld(ISSUE, TITLE, [
+			...liveRules,
+			...briefRules(),
+			prListRule([]),
+			prCreateRule({ stdout: `${PR_URL}\n` }),
+			prEditRule({ json: {} }),
+			prReadyRule({ json: {} }),
+		]);
+		try {
+			world.seams.preparedBrief = BRIEF_BODY.replace(
+				"The op under proof behaves per its ticket.",
+				"Captured requirement, never re-derived.",
+			);
+			const worktree = await makeWorktree(world);
+			expect(
+				(
+					await bootstrapDraftPr(
+						{ issue: ISSUE, branch: BRANCH, worktree },
+						world.seams,
+					)
+				).status,
+			).toBe("created");
+			world.setRules([
+				...liveRules,
+				...briefRules(),
+				prListRule([DRAFT_PR]),
+				prEditRule({ json: {} }),
+				prReadyRule({ json: {} }),
+				{ args: ["issue", "edit"], json: {} },
+			]);
+			expect(
+				(
+					await handOffPr(
+						{
+							issue: ISSUE,
+							branch: BRANCH,
+							worktree,
+							verifyResults: [{ command: "exit 0", ok: true }],
+						},
+						world.seams,
+					)
+				).status,
+			).toBe("handed-off");
+			expect(
+				world
+					.argvLog()
+					.some(
+						(c) =>
+							c.endsWith("--json title,body") ||
+							c.endsWith("--json body,labels"),
+					),
+			).toBe(false);
+			for (const call of world
+				.argvLog()
+				.filter((c) => c.startsWith("pr create") || c.startsWith("pr edit"))) {
+				expect(call).toContain("Captured requirement, never re-derived.");
+				expect(call).not.toContain(
+					"The op under proof behaves per its ticket.",
+				);
+			}
+		} finally {
+			cleanupWorld(world);
+		}
+	});
 	test("bootstraps end to end: empty commit, push, draft PR, ticket stays in-progress", async () => {
 		const world = await makeWorld(ISSUE, TITLE, [
 			...briefRules(),

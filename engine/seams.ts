@@ -17,6 +17,9 @@ export interface EngineSeams {
 	checkout: string;
 	/** Root of the worktree convention: <root>/<project>/<branch>. */
 	worktreeRoot: string;
+	/** Prepared handoff captured before Claim; no mutable-body re-derivation. */
+	preparedBrief?: string;
+	preparedVerifyCommands?: readonly string[];
 }
 
 /** The pull request a shaping operation created or reconciled. */

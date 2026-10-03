@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parseAgentDefinition } from "./agent-runner.ts";
 import type { ImplementationSkill } from "./runs/events.ts";
 
 /** The pinned implementer model (durable spec #46, ADR 0004). */
@@ -35,7 +36,11 @@ export const IMPLEMENTATION_SKILLS = [
 
 /** One package-owned agent definition, loaded by exact package path. */
 interface AgentDefinitionPin {
-	role: "implementer" | "standards-reviewer" | "spec-reviewer";
+	role:
+		| "implementer"
+		| "standards-reviewer"
+		| "spec-reviewer"
+		| "readiness-assessor";
 	/** File name under the package's `engine/agents/` directory. */
 	file: string;
 	model: string;
@@ -50,6 +55,11 @@ const AGENT_DEFINITIONS: readonly AgentDefinitionPin[] = [
 		model: REVIEWER_MODEL,
 	},
 	{ role: "spec-reviewer", file: "spec-reviewer.md", model: REVIEWER_MODEL },
+	{
+		role: "readiness-assessor",
+		file: "readiness-assessor.md",
+		model: REVIEWER_MODEL,
+	},
 ];
 
 /** Injectable lookup ports; defaults consult the real host. */
@@ -195,6 +205,22 @@ export async function validateEngineConfig(
 		}
 		if (body.trim() === "") {
 			problems.push(`${pin.role} definition is empty: ${file}`);
+		}
+		if (pin.role === "readiness-assessor") {
+			const definition = parseAgentDefinition(body);
+			if (
+				definition.name !== pin.role ||
+				definition.provider !== "zai" ||
+				definition.model !== pin.model ||
+				definition.thinking !== "high" ||
+				definition.tools.join(",") !== "read_evidence" ||
+				definition.skills.length !== 0 ||
+				definition.body.trim() === ""
+			) {
+				problems.push(
+					"readiness-assessor definition must pin its role/model/thinking and only read_evidence, with no skills",
+				);
+			}
 		}
 		if (pin.model.trim() === "") {
 			problems.push(`${pin.role} model pin is empty`);

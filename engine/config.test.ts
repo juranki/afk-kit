@@ -17,6 +17,7 @@ import { parseAgentDefinition } from "./agent-runner.ts";
 import {
 	IMPLEMENTATION_SKILLS,
 	resolveImplementationSkills,
+	validateEngineConfig,
 } from "./config.ts";
 
 function scratch(): string {
@@ -43,6 +44,29 @@ function agentDirWithSkills(): { agentDir: string; skillsDir: string } {
 	fs.mkdirSync(skillsDir, { recursive: true });
 	return { agentDir, skillsDir };
 }
+
+test("preflight rejects assessor definitions with implementation capabilities or missing role pins", async () => {
+	const root = scratch();
+	try {
+		for (const file of fs.readdirSync(path.join(import.meta.dir, "agents")))
+			fs.copyFileSync(
+				path.join(import.meta.dir, "agents", file),
+				path.join(root, file),
+			);
+		fs.writeFileSync(
+			path.join(root, "readiness-assessor.md"),
+			"---\nname: readiness-assessor\nprovider: zai\nmodel: glm-5.3\nthinking: high\ntools: [read, edit, write, bash]\n---\nAssess readiness.\n",
+		);
+		const result = await validateEngineConfig({
+			definitionsRoot: root,
+			sdkImport: async () => ({}),
+		});
+		expect(result.ok).toBe(false);
+		expect(result.problems.join(" ")).toContain("readiness-assessor");
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
 
 describe("resolveImplementationSkills (L1)", () => {
 	test("resolves each pinned skill to its installed SKILL.md and hashes it", async () => {

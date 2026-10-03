@@ -37,8 +37,8 @@ test("the package ships without the merge-guard extension", () => {
 	);
 });
 
-test("pi exposes readiness only, not a second prompt-facing coordinator loop", async () => {
-	expect(manifest.pi?.extensions).toEqual(["./extensions/readiness/index.ts"]);
+test("pi exposes no obsolete template-enforcement or planning-gate tools", async () => {
+	expect(manifest.pi?.extensions).toEqual([]);
 	expect(manifest.pi?.skills).toEqual([]);
 	expect(
 		fs.existsSync(path.join(repoRoot, "extensions/coordinator/index.ts")),
@@ -63,7 +63,12 @@ test("the distributable ships an executable CLI and exact agent resources, witho
 	const files = pack.files.map((f) => f.path);
 	expect(manifest.bin).toEqual({ afk: "./engine/cli.ts" });
 	expect(files).toContain("engine/cli.ts");
-	for (const role of ["implementer", "standards-reviewer", "spec-reviewer"]) {
+	for (const role of [
+		"implementer",
+		"standards-reviewer",
+		"spec-reviewer",
+		"readiness-assessor",
+	]) {
 		expect(files).toContain(`engine/agents/${role}.md`);
 	}
 	expect(
@@ -97,10 +102,7 @@ test("pi loads the package without retired coordinator tools or skills", async (
 		await loader.reload();
 		const loaded = loader.getExtensions();
 		expect(loaded.errors).toEqual([]);
-		expect(loaded.extensions).toHaveLength(1);
-		expect([...(loaded.extensions[0]?.tools.keys() ?? [])]).toEqual([
-			"readiness_check",
-		]);
+		expect(loaded.extensions).toHaveLength(0);
 		expect(
 			loader
 				.getSkills()
@@ -115,7 +117,12 @@ test("pi loads the package without retired coordinator tools or skills", async (
 });
 
 test("package-owned agent definitions pin models, thinking and role capabilities", () => {
-	for (const role of ["implementer", "standards-reviewer", "spec-reviewer"]) {
+	for (const role of [
+		"implementer",
+		"standards-reviewer",
+		"spec-reviewer",
+		"readiness-assessor",
+	]) {
 		const definition = parseAgentDefinition(
 			fs.readFileSync(
 				path.join(repoRoot, "engine/agents", `${role}.md`),
@@ -128,7 +135,11 @@ test("package-owned agent definitions pin models, thinking and role capabilities
 		);
 		expect(definition.thinking).toBe("high");
 		expect(definition.tools).toEqual(
-			role === "implementer" ? ["read", "edit", "write", "bash"] : ["read"],
+			role === "implementer"
+				? ["read", "edit", "write", "bash"]
+				: role === "readiness-assessor"
+					? ["read_evidence"]
+					: ["read"],
 		);
 	}
 });

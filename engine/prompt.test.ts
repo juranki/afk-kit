@@ -16,6 +16,27 @@ import {
 	requireDone,
 } from "./prompt.ts";
 
+test("Implementer and Spec Reviewer share captured evidence without making guidance binding", () => {
+	const brief = "immutable prepared requirements\ncaptured discussion evidence";
+	const facts = {
+		issue: 84,
+		branch: "issue-84-readiness",
+		worktree: "/wt",
+		cycle: 1,
+		brief,
+		diffPath: "/diff",
+	};
+	for (const prompt of [
+		buildImplementerPrompt(facts),
+		buildSpecReviewPrompt(facts),
+	]) {
+		expect(prompt).toContain(brief);
+		expect(prompt).toContain("guidance is non-binding");
+		expect(prompt).toContain("meaningful contradictions");
+	}
+	expect(buildImplementerPrompt(facts)).toContain("validate assumptions");
+});
+
 describe("parseImplementerResult", () => {
 	test("reads the fenced status block: done, no open questions", () => {
 		const text = [
