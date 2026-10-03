@@ -90,7 +90,10 @@ Review, interruption, handoff, and Escalation details pending broader reconcilia
 
 ## Implementation status
 
-This is the confirmed contract, not a claim that semantic assessment already ships.
-The current body-template runtime is replaced by [Task: implement and verify agentic
-readiness and prepared briefs](https://github.com/juranki/afk-kit/issues/84). See
-[implementation seams](../requirements/agentic-readiness-implementation.md).
+Semantic assessment ships through `engine/assessment.ts`, the package-owned
+`readiness-assessor`, and bounded Engine-mediated evidence reads. See [implementation
+evidence](../evidence/issue-84-readiness.md). `artifacts/readiness/` retains the source
+snapshot/revision, streamed SDK events, structured assessment, prepared brief and its
+hash. The legacy Run-root `brief.md`/hash retains only the initial Issue body;
+it is not the prepared handoff. No prompt-facing template-check tool is installed.
+The end-to-end proof Run remains with #52.

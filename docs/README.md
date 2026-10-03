@@ -4,9 +4,9 @@ This is the entry point for deciding where workflow information belongs and wher
 find its canonical form. Follow links rather than copying claims between artifacts.
 
 The toolkit is implemented here ([ADR 0010](adr/0010-retire-the-design-only-policy.md)).
-The Engine CLI exists; semantic readiness is a confirmed contract awaiting its
-implementation successor. Playbooks distinguish this contract from shipped behavior;
-the broader pivot record and proof Run remain in progress.
+The Engine CLI ships semantic readiness and immutable prepared briefs; see the
+[implementation evidence](evidence/issue-84-readiness.md). The broader pivot record
+and end-to-end proof Run remain in progress.
 
 ## Find information by task
 

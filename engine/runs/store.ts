@@ -1,10 +1,12 @@
 /**
  * The Run store (ticket afk-kit #59, durable spec #46): creates and opens a
  * Run's durable directory, guards it with a per-Run lock, holds the
- * immutable Ticket brief snapshot and its hash, keeps the authoritative
+ * initial Issue-body source snapshot and its legacy `brief` hash, keeps the authoritative
  * append-only event stream, and trails a replaceable `run.json` projection
  * after it. The artifact layout retains complete SDK, Verify, Verdict, and
- * Escalation evidence; nothing here deletes.
+ * Escalation evidence; nothing here deletes. ADR 0016's separate prepared brief,
+ * captured sources/revision, output and hash live under artifacts/readiness/;
+ * the legacy Run-root body is never the implementation handoff.
  *
  * Everything is owner-only (0700 directories, 0600 files): Run evidence
  * carries private repository material and stays outside every repository.
@@ -74,7 +76,7 @@ export interface CreateRunOptions {
 	owner: string;
 	repo: string;
 	ticket: number;
-	/** The Ticket brief body to snapshot immutably. */
+	/** Initial Issue-body source snapshot (legacy field name, not the prepared handoff). */
 	brief: string;
 	now?: () => Date;
 	runId?: string;

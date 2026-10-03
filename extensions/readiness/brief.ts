@@ -1,11 +1,9 @@
 /**
- * Agent brief parser (ADR 0012's readiness check, ticket afk-kit #24).
- *
- * Splits a ticket body into the brief-template lines the readiness check's
- * inspections read. The template is fixed to the shipped one
- * (docs/brief-template.md): seven fields, of which "Blocked by / blocks" is
- * carried as two lines (`blockedBy`, `blocks`) because the tracker's native
- * dependency check needs them separately.
+ * Compatibility parser for the prepared brief's Markdown projection and
+ * historical operation fixtures. This is not source-author readiness validation
+ * (retired by ADR 0016). Engine readiness validates structured assessor output;
+ * Verify uses its structured command list. PR shaping still consumes the
+ * acceptance/context fields projected here.
  *
  * Field content runs from the `**Label:**` line to the next known field label
  * or the end of the brief section. The brief section is the body between a
@@ -14,7 +12,7 @@
  * heading — are template-mandated structure.
  */
 
-export type FieldName =
+type FieldName =
 	| "summary"
 	| "acceptanceCriteria"
 	| "verifyCommands"

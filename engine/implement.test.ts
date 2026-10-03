@@ -60,7 +60,13 @@ function readinessRule(
 	labels: string[] = ["ready-for-agent"],
 ): GhRule {
 	return {
-		args: ["issue", "view", String(ISSUE), "--json", "body,labels,blockedBy"],
+		args: [
+			"issue",
+			"view",
+			String(ISSUE),
+			"--json",
+			"body,labels,blockedBy,title,url,author,state,number",
+		],
 		json: {
 			body,
 			labels: labels.map((name) => ({ name })),
@@ -137,6 +143,8 @@ interface RunOptions {
 	labels?: string[];
 	env?: NodeJS.ProcessEnv;
 	config?: ConfigPorts;
+	assessmentOutput?: string;
+	assessmentCapMs?: number;
 }
 
 /**
@@ -181,6 +189,19 @@ async function fixture(
 		...extraRules,
 		{
 			args: [
+				"api",
+				"repos/juranki/afk-kit/issues/60/comments?per_page=100&page=1",
+			],
+			json: [
+				{
+					id: 123,
+					body: "Conclusion: carry this bounded change; verify with bun test.",
+					user: { login: "maintainer" },
+				},
+			],
+		},
+		{
+			args: [
 				"issue",
 				"view",
 				String(ISSUE),
@@ -219,6 +240,57 @@ async function fixture(
 					confinementRuntime: runtime.port,
 					git: offlineFetchGit(world),
 					config: { skillsRoot: skills.root, ...options.config },
+					assessment: {
+						capMs: options.assessmentCapMs,
+						sessionFactory: async () => ({
+							subscribe: () => () => {},
+							prompt: async () => {},
+							abort: () => {},
+							dispose: () => {},
+							getLastAssistantText: () =>
+								options.assessmentOutput ??
+								JSON.stringify({
+									status: "ready",
+									brief: {
+										intent: {
+											text: "Carry the settled intent",
+											refs: ["comments:juranki/afk-kit#60"],
+										},
+										scope: [
+											{
+												text: "Bounded change",
+												refs: ["issue:juranki/afk-kit#60"],
+											},
+										],
+										exclusions: [
+											{
+												text: "Unrelated work",
+												refs: ["issue:juranki/afk-kit#60"],
+											},
+										],
+										acceptanceCriteria: [
+											{
+												text: "Settled behavior works",
+												refs: ["comments:juranki/afk-kit#60"],
+											},
+										],
+										constraints: [],
+										verifyCommands: [
+											{
+												command: "bun test",
+												verifies: "Requested behavior",
+												refs: ["comments:juranki/afk-kit#60"],
+											},
+										],
+										dependencies: [],
+										decisions: [],
+										repositoryContext: [],
+										guidance: [],
+										assumptions: [],
+									},
+								}),
+						}),
+					},
 				},
 			}),
 	};
@@ -238,6 +310,33 @@ function onlyRun(xdg: string): string {
 }
 
 describe("runImplement (L2)", () => {
+	test("a non-template Issue settled in comments prepares a brief before live Claim", async () => {
+		const f = await fixture([
+			readinessRule("Please carry the change discussed below."),
+		]);
+		try {
+			expect(await f.run()).toBe(1);
+			const dir = onlyRun(f.xdg);
+			const events = readRunEvents(path.join(dir, "events.jsonl")).events;
+			expect(
+				events
+					.filter((e) => e.name === RUN_EVENT_NAMES.stageEntered)
+					.map((e) => e.payload.stage),
+			).toEqual(["preflight", "readiness", "claim"]);
+			expect(
+				fs.readFileSync(
+					path.join(dir, "artifacts/readiness/prepared-brief.md"),
+					"utf8",
+				),
+			).toContain("Conclusion: carry this bounded change");
+			expect(events.some((e) => e.name === RUN_EVENT_NAMES.cycleStarted)).toBe(
+				false,
+			);
+			expect(f.world.argvLog().join("\n")).not.toContain("edit");
+		} finally {
+			cleanupWorld(f.world);
+		}
+	});
 	test("a safe start reaches Claim and durably refuses an existing Claim", async () => {
 		const runtime = fakeRuntime();
 		const f = await fixture([readinessRule(PASSING_BODY)], runtime);
@@ -335,13 +434,20 @@ describe("runImplement (L2)", () => {
 		cleanupWorld(f.world);
 	});
 
-	test("a readiness failure refuses on the immutable snapshot", async () => {
+	test("unresolved intent refuses on the captured discussion, distinctly from assessment failure", async () => {
 		const body = PASSING_BODY.replace(
 			"**Open questions:** none",
 			"**Open questions:** which slice first?",
 		);
 		const f = await fixture([readinessRule(body)]);
-		const exit = await f.run();
+		const exit = await f.run({
+			assessmentOutput: JSON.stringify({
+				status: "needs-clarification",
+				questions: [
+					{ text: "Which slice first?", refs: ["issue:juranki/afk-kit#60"] },
+				],
+			}),
+		});
 
 		expect(exit).toBe(1);
 		const dir = onlyRun(f.xdg);
@@ -354,9 +460,66 @@ describe("runImplement (L2)", () => {
 		expect(stages).toEqual(["preflight", "readiness"]);
 		const outcome = events.find((e) => e.name === RUN_EVENT_NAMES.outcome);
 		expect(outcome?.payload.outcome).toBe("refused");
-		expect(String(outcome?.payload.reason)).toContain("open-questions");
+		expect(String(outcome?.payload.reason)).toContain("needs-clarification");
 
 		cleanupWorld(f.world);
+	});
+
+	test("malformed output, unavailable relevant evidence and exhausted budget refuse without Claim or cycles", async () => {
+		for (const failure of ["malformed", "unavailable", "timeout"]) {
+			const f = await fixture([
+				readinessRule("Clear intent discussed in comments"),
+				...(failure === "unavailable"
+					? [
+							{
+								args: [
+									"api",
+									"repos/juranki/afk-kit/issues/60/comments?per_page=100&page=1",
+								],
+								status: 4,
+							},
+						]
+					: []),
+			]);
+			try {
+				expect(
+					await f.run({
+						assessmentOutput: "not JSON",
+						assessmentCapMs: failure === "timeout" ? 1 : undefined,
+					}),
+				).toBe(1);
+				const dir = onlyRun(f.xdg);
+				const events = readRunEvents(path.join(dir, "events.jsonl")).events;
+				expect(
+					String(
+						events.find((e) => e.name === RUN_EVENT_NAMES.outcome)?.payload
+							.reason,
+					),
+				).toContain("assessment-failure");
+				expect(
+					events.some(
+						(e) =>
+							e.payload.stage === "claim" ||
+							e.name === RUN_EVENT_NAMES.cycleStarted,
+					),
+				).toBe(false);
+				expect(f.world.argvLog().join("\n")).not.toContain("edit");
+				expect(
+					fs.readFileSync(
+						path.join(dir, "artifacts/readiness/assessment.json"),
+						"utf8",
+					),
+				).toContain(
+					failure === "malformed"
+						? "malformed-output"
+						: failure === "timeout"
+							? "assessment-timeout"
+							: "unavailable-evidence",
+				);
+			} finally {
+				cleanupWorld(f.world);
+			}
+		}
 	});
 
 	test("an unreadable ticket refuses durably on a placeholder snapshot", async () => {
@@ -367,7 +530,7 @@ describe("runImplement (L2)", () => {
 					"view",
 					String(ISSUE),
 					"--json",
-					"body,labels,blockedBy",
+					"body,labels,blockedBy,title,url,author,state,number",
 				],
 				status: 4,
 			},

@@ -21,6 +21,7 @@ import { verifyCommandList } from "../extensions/readiness/check.ts";
 import {
 	createImplementerSessionFactory,
 	runAgentSession,
+	type SessionFactory,
 } from "./agent-runner.ts";
 import { createTaskConfinement } from "./confinement.ts";
 import type { Interruption } from "./drive.ts";
@@ -69,6 +70,8 @@ export interface CyclePortDeps {
 	seams: EngineSeams;
 	/** The immutable brief snapshot; verify commands are read from it. */
 	brief: string;
+	/** Structured immutable commands established by assessment; never parse source Markdown. */
+	verifyCommands?: readonly string[];
 	ports?: CyclePortPorts;
 }
 
@@ -163,7 +166,7 @@ function feedbackEntry(
 export function createCyclePort(deps: CyclePortDeps): CyclePort {
 	const { handle, seams, brief } = deps;
 	const ports = deps.ports ?? {};
-	const commands = verifyCommandsOf(brief);
+	const commands = [...(deps.verifyCommands ?? verifyCommandsOf(brief))];
 
 	return async (cycle: number): Promise<CycleOutcome> => {
 		// Claim facts, as the driving loop recorded them.

@@ -272,6 +272,7 @@ interface RunResult {
 }
 
 interface RunDrivenOptions {
+	verifyCommands?: readonly string[];
 	behavior?: StartedWorld["behavior"];
 	confinementRuntime?: unknown;
 	/** The session hangs until its abort; models the wall-clock cap. */
@@ -292,6 +293,7 @@ async function runDrivenWorld(
 		handle: started.handle,
 		seams: started.world.seams,
 		brief: BRIEF_BODY,
+		verifyCommands: options.verifyCommands,
 		ports: {
 			sessionFactory: scriptedSessionFactory(started, {
 				hang: options.hangSession === true,
@@ -334,6 +336,26 @@ async function runDrivenWorld(
 	const events = readRunEvents(started.handle.eventsPath).events;
 	return { exit, started, events, stderr: stderrLines.join("") };
 }
+
+test("Engine Verify executes the structured prepared commands verbatim, including shell backticks", async () => {
+	const command = 'test "`printf captured`" = captured';
+	const result = await runDrivenWorld({
+		verifyCommands: [command],
+		behavior: async (_cycle, wt, git) => implementFeature(wt, git),
+	});
+	try {
+		expect(result.exit).toBe(0);
+		const observed = JSON.parse(
+			fs.readFileSync(
+				path.join(result.started.handle.artifactsDir, "cycle-1/result.json"),
+				"utf8",
+			),
+		);
+		expect(observed.verifyResults).toEqual([{ command, ok: true }]);
+	} finally {
+		cleanupWorld(result.started.world);
+	}
+});
 
 describe("createCyclePort: the approved path", () => {
 	let result: RunResult;

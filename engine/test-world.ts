@@ -14,6 +14,30 @@ import { runGit } from "../extensions/coordinator/git.ts";
 import { runGh } from "../extensions/readiness/gh.ts";
 import type { EngineSeams } from "./seams.ts";
 
+const statement = { text: "Use the settled discussion", refs: ["issue:84"] };
+export const readyAssessment = {
+	status: "ready",
+	brief: {
+		intent: statement,
+		scope: [statement],
+		exclusions: [statement],
+		acceptanceCriteria: [statement],
+		constraints: [],
+		verifyCommands: [
+			{
+				command: "bun test",
+				verifies: "Requested behavior",
+				refs: ["repo:package.json"],
+			},
+		],
+		dependencies: [],
+		decisions: [statement],
+		repositoryContext: ["package.json"],
+		guidance: ["Prefer a small module"],
+		assumptions: [],
+	},
+};
+
 /** A rule matches one `gh` argv by prefix; first match wins. */
 export interface GhRule {
 	args: string[];
@@ -160,6 +184,20 @@ export async function makeWorld(
 export function baseRules(issue: number, title: string): GhRule[] {
 	return [
 		{ args: ["api", "user"], json: { login: "maintainer" } },
+		{
+			args: [
+				"issue",
+				"view",
+				String(issue),
+				"--json",
+				"state,labels,blockedBy",
+			],
+			json: {
+				state: "OPEN",
+				labels: [{ name: "ready-for-agent" }],
+				blockedBy: { nodes: [] },
+			},
+		},
 		{
 			args: [
 				"issue",

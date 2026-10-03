@@ -11,6 +11,7 @@ import {
 	cleanupWorld,
 	type GhRule,
 	makeWorld,
+	readyAssessment,
 } from "./test-world.ts";
 
 const ISSUE = 66;
@@ -53,7 +54,30 @@ function session(
 function rules(draftExists = false): GhRule[] {
 	return [
 		{
-			args: ["issue", "view", String(ISSUE), "--json", "body,labels,blockedBy"],
+			args: ["api", "repos/test/remote/issues/66/comments?per_page=100&page=1"],
+			json: [
+				{
+					id: 9,
+					body: "Settled conclusion: implement and verify the requested behavior",
+				},
+			],
+		},
+		{
+			args: ["issue", "view", String(ISSUE), "--json", "title"],
+			json: { title: TITLE },
+		},
+		{
+			args: ["issue", "view", String(ISSUE), "--json", "labels"],
+			json: { labels: [{ name: "in-progress" }] },
+		},
+		{
+			args: [
+				"issue",
+				"view",
+				String(ISSUE),
+				"--json",
+				"body,labels,blockedBy,title,url,author,state,number",
+			],
 			json: {
 				body: BODY,
 				labels: [{ name: "ready-for-agent" }],
@@ -152,8 +176,11 @@ test.each([
 					child.exited,
 				]).then(([stdout, stderr, exitCode]) => ({ stdout, stderr, exitCode }));
 			};
-			const implementer: SessionFactory = async (request) =>
-				session(
+			const implementerPrompts: string[] = [],
+				specPrompts: string[] = [];
+			const implementer: SessionFactory = async (request) => {
+				implementerPrompts.push(request.prompt);
+				return session(
 					'```json\n{"status":"done","summary":"implemented","openQuestions":[]}\n```',
 					async () => {
 						if (outcome !== "handoff")
@@ -176,6 +203,7 @@ test.each([
 						world.setRules(rules(true));
 					},
 				);
+			};
 			let reviewsStarted = 0;
 			let release!: () => void;
 			const bothStarted = new Promise<void>((resolve) => {
@@ -184,6 +212,7 @@ test.each([
 			const reviewer =
 				(standards: boolean): SessionFactory =>
 				async (request) => {
+					if (!standards) specPrompts.push(request.prompt);
 					const hash = createHash("sha256")
 						.update(fs.readFileSync(path.join(request.worktree, "AGENTS.md")))
 						.digest("hex");
@@ -209,6 +238,44 @@ test.each([
 					worktreeRoot: world.worktreeRoot,
 					config: { skillsRoot },
 					confinementRuntime: runtime,
+					assessment: {
+						sessionFactory: async () =>
+							session(
+								JSON.stringify({
+									status: "ready",
+									brief: {
+										...readyAssessment.brief,
+										intent: {
+											text: "Ship the Engine",
+											refs: ["issue:test/remote#66"],
+										},
+										scope: [
+											{
+												text: "Ship the Engine",
+												refs: ["issue:test/remote#66"],
+											},
+										],
+										exclusions: [
+											{ text: "merge", refs: ["issue:test/remote#66"] },
+										],
+										acceptanceCriteria: [
+											{
+												text: "The CLI hands over an approved PR",
+												refs: ["issue:test/remote#66"],
+											},
+										],
+										decisions: [],
+										verifyCommands: [
+											{
+												command: "test -f candidate.txt",
+												verifies: "candidate is produced",
+												refs: ["issue:test/remote#66"],
+											},
+										],
+									},
+								}),
+							),
+					},
 					cycle: { sessionFactory: implementer, confinementRuntime: runtime },
 					review: {
 						standardsFactory: reviewer(true),
@@ -242,6 +309,33 @@ test.each([
 				expect(reviewsStarted).toBe(0);
 				return;
 			}
+			const prepared = fs.readFileSync(
+				path.join(dir, "artifacts/readiness/prepared-brief.md"),
+				"utf8",
+			);
+			expect(implementerPrompts).toHaveLength(1);
+			expect(specPrompts).toHaveLength(1);
+			for (const prompt of [...implementerPrompts, ...specPrompts])
+				expect(prompt).toContain(prepared);
+			expect(prepared).toContain("Settled conclusion");
+			expect(
+				world
+					.argvLog()
+					.filter(
+						(s) =>
+							s ===
+							"issue view 66 --json body,labels,blockedBy,title,url,author,state,number",
+					),
+			).toHaveLength(1);
+			expect(
+				world
+					.argvLog()
+					.some(
+						(s) =>
+							s === "issue view 66 --json title,body" ||
+							s === "issue view 66 --json body,labels",
+					),
+			).toBe(false);
 			expect(err).toEqual([]);
 			expect(out.join("")).toContain("handed over");
 			expect(fs.existsSync(path.join(dir, "artifacts/cycle-1/verify"))).toBe(

@@ -21,7 +21,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { GitResult } from "../extensions/coordinator/git.ts";
 import { projectFor, slugFor } from "../extensions/coordinator/slug.ts";
-import type { GhRunner } from "../extensions/readiness/gh.ts";
+import { checkTriageLabels } from "../extensions/readiness/check.ts";
+import { type GhRunner, nativeBlockersOf } from "../extensions/readiness/gh.ts";
 import type { EngineSeams } from "./seams.ts";
 
 /** The authorship every Engine- and Implementer-side commit carries. */
@@ -111,6 +112,33 @@ export async function claimTicket(
 			status: "refused",
 			issue,
 			text: `CLAIM_REFUSAL: #${issue} carries in-progress with no assignee — leftover claim state; a maintainer should clear it.`,
+		};
+	}
+
+	// Live coordination facts, not discussion freshness. Ready never bypasses these.
+	const live = await ghJson<{
+		state: string;
+		labels: { name: string }[];
+		blockedBy: {
+			nodes: { number: number; state: string }[];
+			totalCount?: number;
+		};
+	}>(seams.gh, [
+		"issue",
+		"view",
+		String(issue),
+		"--json",
+		"state,labels,blockedBy",
+	]);
+	const triage = checkTriageLabels(live.labels.map((l) => l.name));
+	const blockers = (
+		await nativeBlockersOf(issue, live.blockedBy, seams.gh)
+	).filter((b) => b.state === "OPEN");
+	if (live.state !== "OPEN" || !triage.pass || blockers.length) {
+		return {
+			status: "refused",
+			issue,
+			text: `CLAIM_REFUSAL: #${issue} is not live Claimable: state ${live.state}; ${triage.detail}; open blockers ${blockers.map((b) => `#${b.number}`).join(", ") || "none"}.`,
 		};
 	}
 

@@ -6,7 +6,7 @@
 	"bin": {
 		"afk": "./engine/cli.ts"
 	},
-	"description": "Deterministic AFK delivery Engine and readiness tooling for pi",
+	"description": "Deterministic AFK delivery Engine with read-only agentic readiness for pi",
 	"files": [
 		"engine/**/*.ts",
 		"engine/agents/*.md",
@@ -22,12 +22,11 @@
 		"lint": "biome check .",
 		"deadcode": "KNIP_DISABLE_RAW_TRANSFER=1 knip",
 		"verify": "bun test --pass-with-no-tests && biome check . && KNIP_DISABLE_RAW_TRANSFER=1 knip && bun scripts/drift-review.ts",
-		"confinement:smoke": "bun scripts/confinement-smoke.ts"
+		"confinement:smoke": "bun scripts/confinement-smoke.ts",
+		"readiness:smoke": "bun scripts/readiness-smoke.ts"
 	},
 	"pi": {
-		"extensions": [
-			"./extensions/readiness/index.ts"
-		],
+		"extensions": [],
 		"skills": []
 	},
 	"peerDependencies": {

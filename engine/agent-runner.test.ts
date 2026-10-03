@@ -13,8 +13,10 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
 	type AgentSessionLike,
+	createAssessmentSessionFactory,
 	parseAgentDefinition,
 	resolveMountedSkillPaths,
 	runAgentSession,
@@ -70,6 +72,46 @@ function scriptedSession(): ScriptedSession {
 	session.getLastAssistantText = () => session.finalText;
 	return session;
 }
+
+test("the package-owned assessor SDK session exposes only Engine-mediated read_evidence", async () => {
+	const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+	const { Type } = await import("typebox");
+	const dir = scratch();
+	const runtime = await ModelRuntime.create({
+		authPath: path.join(dir, "auth.json"),
+		modelsPath: path.join(dir, "models.json"),
+	});
+	const factory = createAssessmentSessionFactory({
+		modelRuntime: runtime,
+		readEvidence: {
+			name: "read_evidence",
+			label: "Evidence",
+			description: "Read only",
+			parameters: Type.Object({}),
+			execute: async () => ({
+				content: [{ type: "text", text: "captured" }],
+				details: undefined,
+			}),
+		},
+	});
+	const session = await factory({
+		worktree: dir,
+		prompt: "unused",
+		eventsPath: path.join(dir, "events.jsonl"),
+		capMs: 1000,
+	});
+	try {
+		expect((session as AgentSession).getActiveToolNames()).toEqual([
+			"read_evidence",
+		]);
+		expect((session as AgentSession).systemPrompt).toContain(
+			"historical suggestions",
+		);
+	} finally {
+		await session.dispose();
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
 
 describe("runAgentSession", () => {
 	test("prompts one fresh session once, completes, and persists the stream", async () => {

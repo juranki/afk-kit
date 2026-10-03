@@ -14,8 +14,11 @@ Hard rules:
 
 - Commit only inside this ticket's worktree, on its branch. Never push, never
   open or comment on pull requests, never write to the issue tracker.
-- Work only within the ticket brief's acceptance criteria and touched areas;
-  out-of-scope means out-of-scope.
+- Work within the prepared brief's binding intent, scope, criteria and constraints;
+  out-of-scope means out-of-scope. Captured evidence is shared with Spec Review.
+  Guidance and suggested touch points are non-binding, not a path allowlist.
+  Inspect changed code and validate assumptions; justify guidance departures with
+  evidence. Meaningful later contradictions require Escalation, not reinterpretation.
 - Done means every verify command in the brief passes, the worktree is clean,
   and at least one new commit exists. Report honestly; observed facts override
   prose.

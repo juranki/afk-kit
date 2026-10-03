@@ -2,7 +2,9 @@
 
 This is a navigation/handoff record for [Task: implement and verify agentic readiness
 and prepared briefs](https://github.com/juranki/afk-kit/issues/84), not an alternate
-specification or a claim of shipped behavior. [ADR 0016](../adr/0016-agentic-readiness-and-prepared-brief.md),
+specification. The implementation is now carried by #84; see [shipped verification
+evidence](../evidence/issue-84-readiness.md). The table below preserves the record
+update's original seam inventory, not a replacement runtime contract. [ADR 0016](../adr/0016-agentic-readiness-and-prepared-brief.md),
 the [brief standard](../brief-template.md), and the [confirmed
 resolution](https://github.com/juranki/afk-kit/issues/82#issuecomment-5960837807)
 own the contract. No assessment code or proof Run is part of the record update.

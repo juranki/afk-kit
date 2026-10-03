@@ -36,10 +36,11 @@ The vocabulary and invariants of this workflow live in the
 | [`system-intent/`](system-intent/) | Model frame: the [Agent Delivery Workflow ontology](system-intent/ontologies/agent-delivery-workflow.md) (terms + invariants), fictional characters, and user stories that pressure-test the design |
 | [`docs/`](docs/) | ADRs, playbooks, conventions, and implementation requirements |
 | [`skills/`](skills/) | The outgoing `coordinator` skill, pending reconciliation under the pivot map ([ADR 0013](docs/adr/0013-coordinator-skill-carries-judgment-agentic-drift-review.md)) |
-| [`extensions/`](extensions/) | Deterministic readiness and coordinator-operation extensions; the merge-guard extension was retired by [ticket #49](https://github.com/juranki/afk-kit/issues/49), the vendored `subagent` extension by [ticket #41](https://github.com/juranki/afk-kit/issues/41) |
+| [`engine/`](engine/) | Deterministic delivery CLI, package-owned assessment/implementation/review sessions, and durable Run evidence |
+| [`extensions/`](extensions/) | Shared tracker, Git, brief-projection, and PR-shaping libraries; no prompt-facing extensions are installed |
 | [`prototype/`](prototype/), [`scripts/`](scripts/) | Throwaway prototypes and verification support |
 
-**Stack:** TypeScript on **Bun**, packaged as a pi-package (extensions and skills),
+**Stack:** TypeScript on **Bun**, packaged as a pi-package with the `afk` CLI and package-owned agents,
 linted with Biome, dead-code-checked with Knip. POSIX-only.
 
 **Design philosophy:** deterministic code enforces mechanics; prompt-driven skills
@@ -50,9 +51,11 @@ is moving orchestration into a traceable coordinator engine on a guard-rail stac
 
 **Pivot in progress.** The SDK-driven Engine CLI is implemented; its real proof Run
 is still pending under [Map: The pivot — deterministic coordinator on a guard-rail
-stack](https://github.com/juranki/afk-kit/issues/43). Semantic readiness is the confirmed
-contract, **not yet the shipped runtime**: the current body-template check awaits
-[Task: implement and verify agentic readiness and prepared briefs](https://github.com/juranki/afk-kit/issues/84).
+stack](https://github.com/juranki/afk-kit/issues/43). Semantic readiness ships as a
+separate read-only assessor with bounded Engine-mediated source reads, structured
+outcomes, and an immutable prepared handoff. Template enforcement and its installed
+`readiness_check` tool are retired. [Verification evidence](docs/evidence/issue-84-readiness.md)
+includes live assessment smokes; it is not the end-to-end proof Run.
 The outgoing Coordinator skill is not packaged. Broader historical pivot records
 remain with [Task: reconcile the record — ADRs, ontology, AGENTS.md,
 playbooks](https://github.com/juranki/afk-kit/issues/53).

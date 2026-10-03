@@ -17,23 +17,22 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type GitRunner, runGit } from "../extensions/coordinator/git.ts";
-import {
-	checkReadiness,
-	checkTriageLabels,
-} from "../extensions/readiness/check.ts";
+import { checkTriageLabels } from "../extensions/readiness/check.ts";
 import {
 	fetchReadinessInput,
 	type GhRunner,
 	type ReadinessInput,
 	runGh,
 } from "../extensions/readiness/gh.ts";
+import type { SessionFactory } from "./agent-runner.ts";
+import { ASSESSMENT_CAP_MS, assessReadiness } from "./assessment.ts";
 import {
 	type ConfigPorts,
 	resolveImplementationSkills,
 	validateEngineConfig,
 } from "./config.ts";
 import { type CyclePortDeps, createCyclePort } from "./cycle.ts";
-import { createInterruption, driveRun } from "./drive.ts";
+import { createInterruption, driveRun, RUN_DEADLINE_MS } from "./drive.ts";
 import {
 	type ConfinementRuntimePort,
 	probeConfinementCapability,
@@ -78,6 +77,7 @@ interface ImplementPorts {
 	/** Agent/confinement ports for seam tests; no CLI or environment overrides. */
 	cycle?: CyclePortDeps["ports"];
 	review?: ReviewPortDeps["ports"];
+	assessment?: { sessionFactory?: SessionFactory; capMs?: number };
 	/** Worktree convention root; production uses ~/wt. */
 	worktreeRoot?: string;
 	/** Clock for Run ids and event timestamps. */
@@ -486,38 +486,73 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 			const failed = facts.checks.filter((c) => !c.pass);
 			if (failed.length > 0) return refuseRun(handle, io, "preflight", failed);
 
-			// Readiness judges the immutable snapshot on disk, not a fresh
-			// fetch (ADR 0012; durable spec #46).
-			const snapshot = fs.readFileSync(handle.briefPath, "utf8");
-			const readiness = checkReadiness({
-				body: snapshot,
-				labels: facts.readinessInput?.labels ?? [],
-				nativeBlockers: facts.readinessInput?.nativeBlockers ?? [],
-				namedStates: facts.readinessInput?.namedStates ?? {},
-			});
-			const readinessArtifact = writeStageReport(handle, "readiness", {
-				inspections: readiness.inspections,
-				generatedAt: new Date().toISOString(),
-			});
+			// ADR 0016: capture once; the assessor prepares a separate handoff.
 			recordEvent(handle, {
 				name: RUN_EVENT_NAMES.stageEntered,
 				payload: { stage: "readiness" },
-				artifacts: [readinessArtifact],
+				artifacts: ["readiness/sources.json", "readiness/assessment.json"],
 			});
-			if (!readiness.ok) {
-				return refuseRun(
-					handle,
-					io,
-					"readiness",
-					readiness.inspections.filter((i) => !i.pass),
+			const started = readRunEvents(handle.eventsPath).events[0]?.ts;
+			const remaining =
+				RUN_DEADLINE_MS -
+				(Date.now() - Date.parse(started ?? new Date().toISOString()));
+			if (facts.baseSha === null || facts.readinessInput === null) {
+				throw new Error(
+					"passing preflight has no repository revision or Issue evidence",
 				);
 			}
+			const readiness = await assessReadiness({
+				ticket,
+				repository: `${repository.owner}/${repository.repo}`,
+				revision: facts.baseSha,
+				cwd,
+				input: facts.readinessInput,
+				gh,
+				git,
+				directory: artifactDir(handle, "readiness"),
+				capMs: Math.min(
+					ports.assessment?.capMs ?? ASSESSMENT_CAP_MS,
+					remaining,
+				),
+				sessionFactory: ports.assessment?.sessionFactory,
+			});
+			writeStageReport(handle, "readiness", { assessment: readiness });
+			if (readiness.status !== "ready") {
+				const detail =
+					readiness.status === "needs-clarification"
+						? readiness.questions
+								.map((q) => `${q.text} [${q.refs.join(", ")}]`)
+								.join("; ")
+						: readiness.reason;
+				return refuseRun(handle, io, "readiness", [
+					fail(readiness.status, detail),
+				]);
+			}
+			const snapshot = fs.readFileSync(
+				path.join(handle.artifactsDir, "readiness", "prepared-brief.md"),
+				"utf8",
+			);
+			recordEvent(handle, {
+				name: RUN_EVENT_NAMES.notice,
+				payload: {
+					message:
+						"Readiness Ready: immutable prepared brief and captured sources established",
+				},
+				artifacts: [
+					"readiness/prepared-brief.md",
+					"readiness/prepared-brief.json",
+				],
+			});
 
 			const seams = {
 				gh,
 				git,
 				checkout: cwd,
 				worktreeRoot: ports.worktreeRoot ?? path.join(os.homedir(), "wt"),
+				preparedBrief: snapshot,
+				preparedVerifyCommands: readiness.brief.verifyCommands.map(
+					(c) => c.command,
+				),
 			};
 			const interruption = createInterruption();
 			return await driveRun({
@@ -530,6 +565,7 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 					handle,
 					seams,
 					brief: snapshot,
+					verifyCommands: seams.preparedVerifyCommands,
 					ports: { ...ports.cycle, interruption },
 				}),
 				runReviews: createReviewPort({

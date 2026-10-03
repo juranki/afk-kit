@@ -219,7 +219,11 @@ function refused(
 
 /** The draft body: the convention's shape with verify commands pending.
  * Exported for its L1 tests. */
-export function draftPrBody(issueBody: string, issue: number): string {
+export function draftPrBody(
+	issueBody: string,
+	issue: number,
+	commands?: readonly string[],
+): string {
 	const brief = parseBrief(issueBody);
 	const lines: string[] = [
 		`Closes #${issue}`,
@@ -235,7 +239,8 @@ export function draftPrBody(issueBody: string, issue: number): string {
 		"## Verify commands",
 		"",
 	];
-	for (const command of verifyCommandList(brief.verifyCommands.value)) {
+	for (const command of commands ??
+		verifyCommandList(brief.verifyCommands.value)) {
 		lines.push(`- \`${command}\` — pending`);
 	}
 	return lines.join("\n").replace(/\n+$/, "\n");
@@ -270,7 +275,7 @@ export async function bootstrapDraftPr(
 			"view",
 			String(issue),
 			"--json",
-			"title,body",
+			seams.preparedBrief === undefined ? "title,body" : "title",
 		]);
 	} catch (error) {
 		return refused(
@@ -326,7 +331,11 @@ export async function bootstrapDraftPr(
 	}
 
 	const title = `${view.title} (#${issue})`;
-	const body = draftPrBody(view.body, issue);
+	const body = draftPrBody(
+		seams.preparedBrief ?? view.body,
+		issue,
+		seams.preparedVerifyCommands,
+	);
 	let openedPr: PrRef | undefined;
 
 	const steps: {
@@ -589,10 +598,20 @@ export async function handOffPr(
 	try {
 		const view = await ghJson<{ body: string; labels: { name: string }[] }>(
 			seams,
-			["issue", "view", String(issue), "--json", "body,labels"],
+			[
+				"issue",
+				"view",
+				String(issue),
+				"--json",
+				seams.preparedBrief === undefined ? "body,labels" : "labels",
+			],
 		);
 		labels = view.labels.map((l) => l.name);
-		body = prBody(parseBrief(view.body), issue, verifyResults);
+		body = prBody(
+			parseBrief(seams.preparedBrief ?? view.body),
+			issue,
+			verifyResults,
+		);
 		if (reviewNotes?.trim()) {
 			body = `${body.replace(/\n+$/, "\n")}\n\n## Review notes\n\n${reviewNotes.trim()}\n`;
 		}

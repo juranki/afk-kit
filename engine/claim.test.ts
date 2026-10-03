@@ -18,6 +18,61 @@ const SLUG = slugFor(TITLE);
 const BRANCH = `issue-${ISSUE}-${SLUG}`;
 
 describe("claimTicket", () => {
+	test("live open blockers and changed triage state refuse without Claim despite a prepared brief", async () => {
+		for (const live of [
+			{
+				state: "OPEN",
+				labels: [{ name: "ready-for-agent" }],
+				blockedBy: { nodes: [{ number: 83, state: "OPEN" }] },
+			},
+			{
+				state: "OPEN",
+				labels: [{ name: "needs-info" }],
+				blockedBy: { nodes: [] },
+			},
+			{
+				state: "OPEN",
+				labels: [{ name: "ready-for-agent" }],
+				blockedBy: { nodes: [{ number: 82, state: "CLOSED" }], totalCount: 2 },
+			},
+			{
+				state: "CLOSED",
+				labels: [{ name: "ready-for-agent" }],
+				blockedBy: { nodes: [] },
+			},
+		]) {
+			const world = await makeWorld(ISSUE, TITLE, [
+				{
+					args: [
+						"issue",
+						"view",
+						String(ISSUE),
+						"--json",
+						"state,labels,blockedBy",
+					],
+					json: live,
+				},
+				{
+					args: [
+						"api",
+						`repos/{owner}/{repo}/issues/${ISSUE}/dependencies/blocked_by?per_page=100&page=1`,
+					],
+					json: [
+						{ number: 82, state: "closed" },
+						{ number: 83, state: "open" },
+					],
+				},
+			]);
+			try {
+				expect((await claimTicket(ISSUE, world.seams)).status).toBe("refused");
+				expect(world.argvLog().some((c) => c.startsWith("issue edit"))).toBe(
+					false,
+				);
+			} finally {
+				cleanupWorld(world);
+			}
+		}
+	});
 	test("claims end to end: branch and worktree from the fetched origin/main SHA, local main untouched", async () => {
 		const world = await makeWorld(ISSUE, TITLE);
 		try {
