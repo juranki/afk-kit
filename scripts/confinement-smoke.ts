@@ -11,10 +11,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
-import {
-	createTaskConfinement,
-	IMPLEMENTER_ALLOWED_DOMAINS,
-} from "../engine/confinement.ts";
+import { createTaskConfinement } from "../engine/confinement.ts";
+import { captureConfinementPolicy } from "../engine/confinement-policy.ts";
 
 import { probeConfinementCapability } from "../engine/preflight.ts";
 
@@ -51,6 +49,12 @@ for (const warning of dependencies.warnings) console.warn(`WARN ${warning}`);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "afk-confinement-smoke-"));
 const worktree = path.join(root, "worktree");
 const outside = path.join(root, "outside.txt");
+const otherRun = path.join(root, "other-run");
+fs.mkdirSync(otherRun);
+const homeProbe = path.join(
+	os.homedir(),
+	`afk-write-probe-${path.basename(root)}`,
+);
 fs.mkdirSync(worktree);
 fs.writeFileSync(path.join(worktree, ".env"), "SMOKE_SECRET=must-not-read\n");
 fs.writeFileSync(
@@ -83,22 +87,40 @@ fs.writeFileSync(
 	"module fixture\n\ngo 1.20\n\nrequire github.com/google/uuid v1.6.0\n",
 );
 fs.writeFileSync(
+	path.join(worktree, "fixture.go"),
+	'package fixture\n/* int afk_probe(void) { return 1; } */\nimport "C"\nfunc nativeAvailable() bool { return C.afk_probe() == 1 }\n',
+);
+fs.writeFileSync(
 	path.join(worktree, "fixture_test.go"),
 	`package fixture
 import (
  "testing"
  "github.com/google/uuid"
 )
-func TestDependency(t *testing.T) { if len(uuid.NewString()) != 36 { t.Fatal("invalid uuid") } }
+func TestDependency(t *testing.T) { if len(uuid.NewString()) != 36 || !nativeAvailable() { t.Fatal("dependency/native verification failed") } }
 `,
+);
+fs.mkdirSync(path.join(worktree, ".afk"));
+fs.writeFileSync(
+	path.join(worktree, ".afk/confinement.json"),
+	JSON.stringify({
+		dependencyHosts: [
+			"proxy.golang.org",
+			"sum.golang.org",
+			"storage.googleapis.com",
+		],
+		nonSecretExamples: [".env.example"],
+	}),
 );
 execFileSync("git", [
 	"-C",
 	worktree,
 	"add",
+	".afk/confinement.json",
 	".gitignore",
 	"go.mod",
 	"fixture_test.go",
+	"fixture.go",
 ]);
 execFileSync("git", [
 	"-C",
@@ -112,10 +134,21 @@ execFileSync("git", [
 	"Go fixture",
 ]);
 
+execFileSync("git", ["-C", worktree, "config", "user.name", "AFK Engine"]);
+execFileSync("git", [
+	"-C",
+	worktree,
+	"config",
+	"user.email",
+	"afk-engine@users.noreply.github.com",
+]);
+execFileSync("git", ["-C", worktree, "config", "commit.gpgsign", "false"]);
+const policy = captureConfinementPolicy(worktree);
 const confinement = await createTaskConfinement({
 	worktree,
 	writablePaths: ["."],
-	allowedDomains: ["example.com", ...IMPLEMENTER_ALLOWED_DOMAINS],
+	allowedDomains: [...policy.dependencyHosts],
+	nonSecretExamples: policy.nonSecretExamples,
 });
 
 async function probe(command: string): Promise<ProbeResult> {
@@ -146,6 +179,26 @@ try {
 		(result) => result.exitCode !== 0 && !fs.existsSync(outside),
 	);
 
+	for (const [name, target] of [
+		["HOME", homeProbe],
+		["another Run", path.join(otherRun, "escaped")],
+	] as const) {
+		const result = await probe(`printf escaped > ${shellQuote(target)}`);
+		requireProbe(
+			`refuse writes to ${name}`,
+			result,
+			(probe) => probe.exitCode !== 0 && !fs.existsSync(target),
+		);
+	}
+	const credentials = await probe(
+		'for file in "$HOME/.gitconfig" "$HOME/.git-credentials" "$HOME/.netrc" "$HOME/.config/gh/hosts.yml"; do if cat "$file" >/dev/null 2>&1; then exit 1; fi; done',
+	);
+	requireProbe(
+		"host Git configuration and credentials remain unreadable",
+		credentials,
+		(result) => result.exitCode === 0,
+	);
+
 	const deniedRead = await probe("cat .env .env.local");
 	requireProbe(
 		"refuse sensitive read",
@@ -164,7 +217,7 @@ try {
 	);
 
 	const allowedNetwork = await probe(
-		"curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://example.com",
+		"curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://proxy.golang.org/github.com/google/uuid/@v/v1.6.0.mod",
 	);
 	requireProbe(
 		"reach allowlisted domain",
@@ -179,6 +232,18 @@ try {
 		"refuse non-allowlisted domain",
 		deniedNetwork,
 		(result) => result.exitCode !== 0,
+	);
+
+	const commit = await probe(
+		"printf committed > changed.txt && git add changed.txt && git commit -qm 'confined commit' && git log -1 --format='%an <%ae>'",
+	);
+	requireProbe(
+		"confined staging and local commits use Engine identity",
+		commit,
+		(result) =>
+			result.exitCode === 0 &&
+			result.output.trim() ===
+				"AFK Engine <afk-engine@users.noreply.github.com>",
 	);
 
 	const temp = await probe(
@@ -199,7 +264,7 @@ try {
 				),
 	);
 
-	const go = await probe("go test -mod=mod ./...");
+	const go = await probe("CGO_ENABLED=1 go test -mod=mod ./...");
 	requireProbe(
 		"cold Go dependency and verification",
 		go,
@@ -271,4 +336,5 @@ try {
 } finally {
 	await confinement.dispose();
 	fs.rmSync(root, { recursive: true, force: true });
+	fs.rmSync(homeProbe, { force: true });
 }

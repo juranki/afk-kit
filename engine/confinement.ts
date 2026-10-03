@@ -13,14 +13,6 @@ import {
 	createLocalBashOperations,
 } from "@earendil-works/pi-coding-agent";
 
-/** Explicit registry policy; Go cannot fall back to direct VCS access. */
-export const IMPLEMENTER_ALLOWED_DOMAINS = [
-	"registry.npmjs.org",
-	"proxy.golang.org",
-	"sum.golang.org",
-	"storage.googleapis.com",
-] as const;
-
 /** The filesystem and network channels one implementer task needs. */
 export interface TaskConfinementNeeds {
 	/** Existing root of the task's Ticket worktree. */
@@ -29,7 +21,19 @@ export interface TaskConfinementNeeds {
 	writablePaths: string[];
 	/** Hostnames (optionally with srt wildcards/ports) the task may reach. */
 	allowedDomains: string[];
+	/** Explicit examples from the immutable Maintainer declaration. */
+	nonSecretExamples?: readonly string[];
 }
+
+const TOOL_DIRECTORIES = {
+	TMPDIR: "tmp",
+	GOTMPDIR: "tmp",
+	GOCACHE: "go-build",
+	GOMODCACHE: "go-mod",
+	XDG_CACHE_HOME: "cache",
+	XDG_CONFIG_HOME: "config",
+	GOPATH: "go-path",
+} as const;
 
 const ENV_ALLOWLIST = [
 	"PATH",
@@ -103,28 +107,36 @@ const SAFE_GIT_ENV = {
 	GIT_TERMINAL_PROMPT: "0",
 };
 
-function trackedExamplePaths(worktree: string): string[] {
-	const example = path.join(worktree, ".env.example");
-	try {
-		// Never exempt symlinks, hardlink aliases or untracked files by name.
+function isolatedGit(worktree: string, args: string[]): string {
+	return execFileSync("git", args, {
+		cwd: worktree,
+		env: { PATH: process.env.PATH, ...SAFE_GIT_ENV },
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+}
+
+function declaredExamplePaths(
+	worktree: string,
+	declarations: readonly string[],
+): string[] {
+	return unique([...declarations]).map((file) => {
+		if (!/^\.env\.[a-zA-Z0-9_-]+$/.test(file))
+			throw new Error(`Invalid non-secret example declaration: ${file}`);
+		const example = path.join(worktree, file);
 		const stat = fs.lstatSync(example);
-		if (!stat.isFile() || stat.nlink !== 1) return [];
-		const entry = execFileSync(
-			"git",
-			["ls-files", "--stage", "--", ".env.example"],
-			{
-				cwd: worktree,
-				env: { PATH: process.env.PATH, ...SAFE_GIT_ENV },
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-			},
-		);
-		return /^100(?:644|755) [0-9a-f]+ 0\t\.env\.example\n$/.test(entry)
-			? [example]
-			: [];
-	} catch {
-		return [];
-	}
+		const entry = isolatedGit(worktree, ["ls-files", "--stage", "--", file]);
+		if (
+			!stat.isFile() ||
+			stat.nlink !== 1 ||
+			!/^100(?:644|755) [0-9a-f]+ 0\t/.test(entry) ||
+			entry.trimEnd().split("\t")[1] !== file
+		)
+			throw new Error(
+				`Declared example must be a tracked regular file without aliases: ${file}`,
+			);
+		return example;
+	});
 }
 
 /**
@@ -134,7 +146,12 @@ function trackedExamplePaths(worktree: string): string[] {
 export function compileConfinementConfig(
 	needs: TaskConfinementNeeds,
 ): SandboxRuntimeConfig {
-	const knownKeys = new Set(["worktree", "writablePaths", "allowedDomains"]);
+	const knownKeys = new Set([
+		"worktree",
+		"writablePaths",
+		"allowedDomains",
+		"nonSecretExamples",
+	]);
 	const unknownKeys = Object.keys(needs).filter((key) => !knownKeys.has(key));
 	if (unknownKeys.length > 0) {
 		throw new Error(
@@ -150,18 +167,18 @@ export function compileConfinementConfig(
 			`Invalid confinement needs: worktree does not exist: ${needs.worktree}`,
 		);
 	}
-	const examples = trackedExamplePaths(worktree);
+	const examples = declaredExamplePaths(
+		worktree,
+		needs.nonSecretExamples ?? [],
+	);
 	if (fs.existsSync(path.join(worktree, ".git"))) {
-		const tracked = execFileSync(
-			"git",
-			["ls-files", "-z", "--", ".env", ".env.*"],
-			{
-				cwd: worktree,
-				env: { PATH: process.env.PATH, ...SAFE_GIT_ENV },
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-			},
-		)
+		const tracked = isolatedGit(worktree, [
+			"ls-files",
+			"-z",
+			"--",
+			".env",
+			".env.*",
+		])
 			.split("\0")
 			.filter(Boolean);
 		const protectedFiles = tracked.filter(
@@ -169,7 +186,7 @@ export function compileConfinementConfig(
 		);
 		if (protectedFiles.length > 0) {
 			throw new Error(
-				`Confinement cannot mask tracked protected file(s) without breaking Git: ${protectedFiles.join(", ")}. Remove secrets from tracking before starting a Run; only a regular tracked .env.example is exempt.`,
+				`Confinement cannot mask tracked protected file(s) without breaking Git: ${protectedFiles.join(", ")}. Remove secrets from tracking before starting a Run; non-secret examples require an explicit Maintainer declaration.`,
 			);
 		}
 	}
@@ -211,13 +228,12 @@ function confinedEnvironment(
 	}
 	return {
 		...env,
-		TMPDIR: path.join(scratch, "tmp"),
-		GOTMPDIR: path.join(scratch, "tmp"),
-		GOCACHE: path.join(scratch, "go-build"),
-		GOMODCACHE: path.join(scratch, "go-mod"),
-		XDG_CACHE_HOME: path.join(scratch, "cache"),
-		XDG_CONFIG_HOME: path.join(scratch, "config"),
-		GOPATH: path.join(scratch, "go-path"),
+		...Object.fromEntries(
+			Object.entries(TOOL_DIRECTORIES).map(([name, directory]) => [
+				name,
+				path.join(scratch, directory),
+			]),
+		),
 		GOENV: "off",
 		GOTELEMETRY: "off",
 		GOPROXY: "https://proxy.golang.org",
@@ -274,14 +290,7 @@ export async function createTaskConfinement(
 	const runtime = dependencies.runtime ?? SandboxManager;
 	const delegate = dependencies.delegate ?? createLocalBashOperations();
 	const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "afk-task-tools-"));
-	for (const directory of [
-		"tmp",
-		"go-build",
-		"go-mod",
-		"cache",
-		"config",
-		"go-path",
-	]) {
+	for (const directory of unique(Object.values(TOOL_DIRECTORIES))) {
 		fs.mkdirSync(path.join(scratch, directory));
 	}
 	config.filesystem.allowWrite.push(scratch);
@@ -302,6 +311,9 @@ export async function createTaskConfinement(
 	const operations: BashOperations = {
 		exec: async (command, cwd, options) => {
 			if (disposed) throw new Error("Task confinement is already disposed");
+			// Never let an agent redirect a declared exemption to protected data
+			// between bash invocations. Permissions themselves stay captured.
+			declaredExamplePaths(worktree, needs.nonSecretExamples ?? []);
 			let realCwd: string;
 			try {
 				realCwd = fs.realpathSync(cwd);

@@ -67,9 +67,10 @@ bun run confinement:smoke
 ```
 
 Expected: all probes pass — worktree writes and outside-write denial, protected reads,
-clean tracked `.env.example` and isolated Git configuration, allowlisted/denied network,
-designated scratch writes, cold Go dependency verification without dirtying the
-Worktree, preserved exit codes, early Go environment diagnostics, and protection of
-untracked examples. See the [confinement policy](implementer-confinement.md).
+clean declared tracked `.env.example` and isolated Git configuration, confined
+staging/commits with Engine identity, allowlisted/denied network, designated scratch
+writes with HOME/other-Run denial, cold Go/native dependency verification without
+dirtying the Worktree, preserved exit codes, early Go environment diagnostics, and
+protection of credentials and undeclared examples. See the [confinement policy](implementer-confinement.md).
 This is a live host-capability and dependency upgrade gate, so it stays separate from
 the deterministic `bun run verify` sweep.

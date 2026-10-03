@@ -13,10 +13,15 @@ import * as path from "node:path";
 import {
 	compileConfinementConfig,
 	createTaskConfinement,
-	IMPLEMENTER_ALLOWED_DOMAINS,
 	type SandboxRuntimePort,
 	type TaskConfinement,
 } from "./confinement.ts";
+import {
+	CLOSED_CONFINEMENT_POLICY,
+	type ConfinementPolicy,
+	captureConfinementPolicy,
+	readPublicRepositoryFile,
+} from "./confinement-policy.ts";
 
 /**
  * The slice of the srt port a start depends on — the same shape
@@ -27,6 +32,7 @@ export type ConfinementRuntimePort = SandboxRuntimePort;
 export interface CapabilityProbe {
 	ok: boolean;
 	detail: string;
+	policy?: ConfinementPolicy;
 }
 
 /**
@@ -42,37 +48,47 @@ export async function probeConfinementCapability(
 	);
 	try {
 		const repository = dependencies.repository;
+		const policy = repository
+			? captureConfinementPolicy(repository)
+			: CLOSED_CONFINEMENT_POLICY;
 		if (repository) {
 			compileConfinementConfig({
 				worktree: repository,
 				writablePaths: ["."],
-				allowedDomains: [],
+				allowedDomains: [...policy.dependencyHosts],
+				nonSecretExamples: policy.nonSecretExamples,
 			});
 			// Copy only public module metadata; never source secrets or host caches.
 			for (const file of ["go.mod", "go.sum"]) {
-				const source = path.join(repository, file);
-				if (fs.existsSync(source))
-					fs.copyFileSync(source, path.join(dir, file));
+				const body = readPublicRepositoryFile(repository, file);
+				if (body !== null) fs.writeFileSync(path.join(dir, file), body);
 			}
 		}
 		const confinement: TaskConfinement = await createTaskConfinement(
 			{
 				worktree: dir,
 				writablePaths: ["."],
-				allowedDomains: [...IMPLEMENTER_ALLOWED_DOMAINS],
+				allowedDomains: [...policy.dependencyHosts],
 			},
 			dependencies,
 		);
 		try {
 			const go = fs.existsSync(path.join(dir, "go.mod"));
-			if (go)
+			if (go) {
+				fs.writeFileSync(
+					path.join(dir, "probe.go"),
+					'package probe\n/* int afk_probe(void) { return 1; } */\nimport "C"\nfunc available() bool { return C.afk_probe() == 1 }\n',
+				);
 				fs.writeFileSync(
 					path.join(dir, "probe_test.go"),
-					'package probe\nimport "testing"\nfunc TestBuild(t *testing.T) {}\n',
+					'package probe\nimport "testing"\nfunc TestBuild(t *testing.T) { if !available() { t.Fatal("native probe failed") } }\n',
 				);
+			}
 			const command =
 				'touch "$TMPDIR/probe" "$GOCACHE/probe" && git config --global --list' +
-				(go ? " && go version && go mod download && go test ./..." : "");
+				(go
+					? " && go version && go mod download && CGO_ENABLED=1 go test ./..."
+					: "");
 			let output = "";
 			const result = await confinement.operations.exec(command, dir, {
 				env: process.env,
@@ -83,13 +99,14 @@ export async function probeConfinementCapability(
 			});
 			if (result.exitCode !== 0)
 				throw new Error(
-					`unsupported verification environment (exit ${String(result.exitCode)}): ${output.trim()}. Check sandbox prerequisites, installed Go/toolchain compatibility, registry access and any local module replacements.`,
+					`unsupported verification environment (exit ${String(result.exitCode)}): ${output.trim()}. Check sandbox prerequisites, installed Go/toolchain compatibility, native compiler availability, registry access and any local module replacements.`,
 				);
 		} finally {
 			await confinement.dispose();
 		}
 		return {
 			ok: true,
+			policy,
 			detail:
 				"sandbox runtime executed tool-cache, temporary-directory and Git probes; Go module/build probe passed when declared",
 		};

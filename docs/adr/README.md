@@ -22,3 +22,4 @@ made and *why*.
 | [ADR 0014: The Ticket worktree is an independent clone](0014-ticket-worktree-is-an-independent-clone.md) | Accepted | Worktree mechanics, confined commits, claim undo |
 | [ADR 0015: Unattended implementation runs the installed implementation skills](0015-unattended-implementation-runs-the-installed-implementation-skills.md) | Accepted | Implementer skill mounting, attended/unattended parity, preflight pinning |
 | [ADR 0016: Agentic readiness and the prepared implementation brief](0016-agentic-readiness-and-prepared-brief.md) | Accepted | Semantic assessment, human source intent, immutable prepared handoff |
+| [ADR 0017: Declare confinement permissions and isolate tool scratch](0017-declared-confinement-and-tool-scratch.md) | Accepted | Captured repository permissions, Go dependency policy, task scratch and Git-safe examples |

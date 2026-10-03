@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -244,6 +245,35 @@ describe("task confinement at the process seam (L2)", () => {
 				expect(fs.existsSync(directory)).toBe(false);
 		} finally {
 			await confinement.dispose();
+		}
+	});
+
+	test("refuses example aliases introduced after task initialization", async () => {
+		const worktree = scratchWorktree();
+		execFileSync("git", ["init", "-q", worktree]);
+		fs.writeFileSync(path.join(worktree, ".env"), "SECRET=never-read");
+		fs.writeFileSync(path.join(worktree, ".env.example"), "PUBLIC=placeholder");
+		execFileSync("git", ["-C", worktree, "add", ".env.example"]);
+		const confinement = await createTaskConfinement(
+			{
+				worktree,
+				writablePaths: ["."],
+				allowedDomains: [],
+				nonSecretExamples: [".env.example"],
+			},
+			{ runtime: fakeRuntime().port },
+		);
+		try {
+			fs.unlinkSync(path.join(worktree, ".env.example"));
+			fs.symlinkSync(".env", path.join(worktree, ".env.example"));
+			await expect(
+				confinement.operations.exec("cat .env.example", worktree, {
+					onData: () => {},
+				}),
+			).rejects.toThrow("without aliases");
+		} finally {
+			await confinement.dispose();
+			fs.rmSync(worktree, { recursive: true, force: true });
 		}
 	});
 

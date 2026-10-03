@@ -377,6 +377,35 @@ describe("runImplement (L2)", () => {
 			cleanupWorld(f.world);
 		}
 	});
+	test("Run start retains the validated repository confinement declaration outside delegated writes", async () => {
+		const f = await fixture([readinessRule(PASSING_BODY)]);
+		try {
+			const declaration = {
+				dependencyHosts: ["proxy.golang.org"],
+				nonSecretExamples: [],
+			};
+			fs.mkdirSync(path.join(f.world.checkout, ".afk"));
+			fs.writeFileSync(
+				path.join(f.world.checkout, ".afk/confinement.json"),
+				JSON.stringify(declaration),
+			);
+			expect(await f.run()).toBe(1);
+			fs.writeFileSync(
+				path.join(f.world.checkout, ".afk/confinement.json"),
+				"{}",
+			);
+			const report = JSON.parse(
+				fs.readFileSync(
+					path.join(onlyRun(f.xdg), "artifacts/preflight/report.json"),
+					"utf8",
+				),
+			);
+			expect(report.confinementPolicy).toEqual(declaration);
+		} finally {
+			cleanupWorld(f.world);
+		}
+	});
+
 	test("a safe start reaches Claim and durably refuses an existing Claim", async () => {
 		const runtime = fakeRuntime();
 		const f = await fixture([readinessRule(PASSING_BODY)], runtime);
