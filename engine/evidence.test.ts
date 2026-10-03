@@ -4,6 +4,217 @@ import * as path from "node:path";
 import { collectEvidence } from "./evidence.ts";
 import { cleanupWorld, makeWorld } from "./test-world.ts";
 
+test("relevant reads capture only governing ancestors, pinned and shared across concurrent reads", async () => {
+	const w = await makeWorld(84, "Scoped instructions", [
+		{
+			args: ["api", "repos/o/r/issues/84/comments?per_page=100&page=1"],
+			json: [],
+		},
+	]);
+	try {
+		const files = [
+			"AGENTS.md",
+			"src/AGENTS.md",
+			"src/area/AGENTS.md",
+			"src/area/one.ts",
+			"src/area/two.ts",
+			"src/sibling/AGENTS.md",
+			"src/area/child/AGENTS.md",
+			"other/AGENTS.md",
+			"other/plain/file.ts",
+		];
+		for (const file of files) {
+			fs.mkdirSync(path.dirname(path.join(w.checkout, file)), {
+				recursive: true,
+			});
+			fs.writeFileSync(path.join(w.checkout, file), `Pinned ${file}`);
+		}
+		await w.git(["add", "."]);
+		await w.git(["commit", "-m", "scoped evidence"]);
+		const revision = (await w.git(["rev-parse", "HEAD"])).stdout.trim();
+		for (const file of files)
+			fs.writeFileSync(path.join(w.checkout, file), "Mutable checkout");
+		fs.writeFileSync(
+			path.join(w.checkout, "other/plain/AGENTS.md"),
+			"Untracked checkout instruction",
+		);
+		const evidence = await collectEvidence({
+			ticket: 84,
+			repository: "o/r",
+			revision,
+			cwd: w.checkout,
+			gh: w.seams.gh,
+			git: w.seams.git,
+			input: { body: "Narrow change", labels: [], nativeBlockers: [] },
+			directory: path.join(w.root, "evidence"),
+		});
+		expect(evidence.snapshot().sources.map((s) => s.id)).toEqual([
+			"issue:o/r#84",
+			"comments:o/r#84",
+			"repo:AGENTS.md",
+		]);
+		const reads = await Promise.all([
+			evidence.read("repo:src/area/one.ts", "Affected code"),
+			evidence.read("repo:src/area/two.ts", "Affected test"),
+			evidence.read("repo:src/area/one.ts", "Concurrent duplicate"),
+		]);
+		expect(reads[0].content).toBe("Pinned src/area/one.ts");
+		expect(reads[2]).toEqual(reads[0]);
+		expect(
+			evidence
+				.snapshot()
+				.sources.map((s) => s.id)
+				.sort(),
+		).toEqual([
+			"comments:o/r#84",
+			"issue:o/r#84",
+			"repo:AGENTS.md",
+			"repo:src/AGENTS.md",
+			"repo:src/area/AGENTS.md",
+			"repo:src/area/one.ts",
+			"repo:src/area/two.ts",
+		]);
+		for (const source of evidence
+			.snapshot()
+			.sources.filter((s) => s.id.startsWith("repo:"))) {
+			expect(source.content).toBe(`Pinned ${source.id.slice(5)}`);
+			expect(source.identity).toBe(`${revision}:${source.id.slice(5)}`);
+		}
+		await evidence.read(
+			"repo:src/sibling/AGENTS.md",
+			"Additional affected scope",
+		);
+		expect(
+			evidence
+				.snapshot()
+				.sources.some((s) => s.id === "repo:src/sibling/AGENTS.md"),
+		).toBe(true);
+		await evidence.read(
+			"repo:other/plain/file.ts",
+			"No instruction in immediate directory",
+		);
+		expect(evidence.snapshot().failures).toEqual([]);
+		expect(
+			evidence.snapshot().sources.some((s) => s.id === "repo:other/AGENTS.md"),
+		).toBe(true);
+		expect(
+			evidence
+				.snapshot()
+				.sources.some((s) => s.id === "repo:other/plain/AGENTS.md"),
+		).toBe(false);
+	} finally {
+		cleanupWorld(w);
+	}
+});
+
+for (const limit of ["sources", "bytes", "unavailable"] as const) {
+	test(`required scoped evidence fails closed on ${limit} and retains prior captures`, async () => {
+		const w = await makeWorld(84, "Readiness", [
+			{
+				args: ["api", "repos/o/r/issues/84/comments?per_page=100&page=1"],
+				json: [],
+			},
+		]);
+		try {
+			fs.mkdirSync(path.join(w.checkout, "area"));
+			fs.writeFileSync(
+				path.join(w.checkout, "area/AGENTS.md"),
+				"G".repeat(2000),
+			);
+			fs.writeFileSync(path.join(w.checkout, "area/file.ts"), "Relevant code");
+			await w.git(["add", "."]);
+			await w.git(["commit", "-m", "required evidence"]);
+			const revision = (await w.git(["rev-parse", "HEAD"])).stdout.trim();
+			const directory = path.join(w.root, "evidence");
+			const evidence = await collectEvidence({
+				ticket: 84,
+				repository: "o/r",
+				revision,
+				cwd: w.checkout,
+				gh: w.seams.gh,
+				git: (args, cwd, signal) =>
+					limit === "unavailable" && args[1] === `${revision}:area/AGENTS.md`
+						? Promise.resolve({
+								exitCode: 1,
+								stdout: "",
+								stderr: "unavailable object",
+							})
+						: w.seams.git(args, cwd, signal),
+				input: { body: "Request", labels: [], nativeBlockers: [] },
+				directory,
+				maxSources: limit === "sources" ? 2 : undefined,
+				maxBytes: limit === "bytes" ? 1000 : undefined,
+			});
+			await expect(
+				evidence.read("repo:area/file.ts", "Affected file"),
+			).rejects.toThrow(
+				limit === "unavailable"
+					? "unavailable-evidence"
+					: "source-budget-exhausted",
+			);
+			expect(evidence.snapshot().sources.map((s) => s.id)).toEqual([
+				"issue:o/r#84",
+				"comments:o/r#84",
+			]);
+			expect(evidence.snapshot().failures.length).toBeGreaterThan(0);
+			expect(
+				JSON.parse(
+					fs.readFileSync(path.join(directory, "sources.json"), "utf8"),
+				).failures,
+			).toEqual(evidence.snapshot().failures);
+		} finally {
+			cleanupWorld(w);
+		}
+	});
+}
+
+for (const response of ["malformed", "exhausted", "bytes"] as const) {
+	test(`comment collection refuses ${response} while retaining page receipts`, async () => {
+		const w = await makeWorld(84, "Readiness");
+		w.setRules(
+			Array.from({ length: 100 }, (_, i) => ({
+				args: [
+					"api",
+					`repos/o/r/issues/84/comments?per_page=100&page=${i + 1}`,
+				],
+				json:
+					response === "malformed"
+						? {}
+						: Array.from({ length: 100 }, () => ({ body: "Comment" })),
+			})),
+		);
+		try {
+			const directory = path.join(w.root, "evidence");
+			await expect(
+				collectEvidence({
+					ticket: 84,
+					repository: "o/r",
+					revision: w.originMainSha,
+					cwd: w.checkout,
+					gh: w.seams.gh,
+					git: w.seams.git,
+					input: { body: "Request", labels: [], nativeBlockers: [] },
+					directory,
+					maxBytes: response === "bytes" ? 1000 : undefined,
+				}),
+			).rejects.toThrow(
+				response === "malformed"
+					? "malformed tracker comments"
+					: "source-budget-exhausted",
+			);
+			expect(w.argvLog()).toHaveLength(response === "exhausted" ? 100 : 1);
+			expect(
+				fs.readFileSync(
+					path.join(directory, "tracker-responses.jsonl"),
+					"utf8",
+				),
+			).toContain("per_page=100&page=1");
+		} finally {
+			cleanupWorld(w);
+		}
+	});
+}
+
 test("read budgets and unavailable relevant sources fail closed and never authorize arbitrary commands", async () => {
 	const w = await makeWorld(84, "Readiness", [
 		{

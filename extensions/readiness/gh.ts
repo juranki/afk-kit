@@ -10,6 +10,7 @@
 
 import { spawn } from "node:child_process";
 import type { BlockerRef, TicketState } from "./check.ts";
+import { collectTrackerPages } from "./pagination.ts";
 
 export interface ReadinessInput {
 	body: string;
@@ -79,21 +80,15 @@ export async function nativeBlockersOf(
 ): Promise<BlockerRef[]> {
 	let edges = blockedBy.nodes;
 	if ((blockedBy.totalCount ?? edges.length) > edges.length) {
-		edges = [];
-		for (let page = 1; page <= 100; page++) {
-			const batch = await ghJson<{ number: number; state: string }[]>(run, [
-				"api",
-				`repos/{owner}/{repo}/issues/${issue}/dependencies/blocked_by?per_page=100&page=${page}`,
-			]);
-			if (!Array.isArray(batch))
-				throw new Error("unavailable-evidence: malformed native dependencies");
-			edges.push(...batch);
-			if (batch.length < 100) break;
-			if (page === 100)
-				throw new Error(
-					"source-budget-exhausted: native dependency pagination",
-				);
-		}
+		edges = await collectTrackerPages<{ number: number; state: string }>({
+			readPage: (page) =>
+				ghJson(run, [
+					"api",
+					`repos/{owner}/{repo}/issues/${issue}/dependencies/blocked_by?per_page=100&page=${page}`,
+				]),
+			malformed: "unavailable-evidence: malformed native dependencies",
+			exhausted: "source-budget-exhausted: native dependency pagination",
+		});
 	}
 	return edges.map((n) => ({
 		number: n.number,

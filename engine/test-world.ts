@@ -12,6 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { runGit } from "../extensions/coordinator/git.ts";
 import { runGh } from "../extensions/readiness/gh.ts";
+import type { Assessment, PreparedBrief } from "./readiness.ts";
 import type { EngineSeams } from "./seams.ts";
 
 const statement = { text: "Use the settled discussion", refs: ["issue:84"] };
@@ -37,6 +38,28 @@ export const readyAssessment = {
 		assumptions: [],
 	},
 };
+
+/** Ground a Ready handoff in the scenario's captured evidence and established Verify command. */
+export function readyAssessmentFor(
+	sourceIds: string[],
+	verifyCommand: PreparedBrief["verifyCommands"][number],
+	overrides: Partial<PreparedBrief> = {},
+): Extract<Assessment, { status: "ready" }> {
+	const grounded = { ...statement, refs: sourceIds };
+	return structuredClone({
+		status: "ready",
+		brief: {
+			...readyAssessment.brief,
+			intent: grounded,
+			scope: [grounded],
+			exclusions: [grounded],
+			acceptanceCriteria: [grounded],
+			decisions: [grounded],
+			verifyCommands: [verifyCommand],
+			...overrides,
+		},
+	});
+}
 
 /** A rule matches one `gh` argv by prefix; first match wins. */
 export interface GhRule {

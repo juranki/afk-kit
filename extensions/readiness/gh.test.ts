@@ -1,6 +1,53 @@
 import { expect, test } from "bun:test";
 import { cleanupWorld, makeWorld } from "../../engine/test-world.ts";
-import { fetchReadinessInput, runGh } from "./gh.ts";
+import { fetchReadinessInput, nativeBlockersOf, runGh } from "./gh.ts";
+
+for (const scenario of ["complete", "malformed", "exhausted"] as const) {
+	test(`native dependency pagination handles ${scenario} without truncation`, async () => {
+		const w = await makeWorld(
+			84,
+			"Readiness",
+			Array.from({ length: 100 }, (_, i) => ({
+				args: [
+					"api",
+					`repos/{owner}/{repo}/issues/84/dependencies/blocked_by?per_page=100&page=${i + 1}`,
+				],
+				json:
+					scenario === "malformed"
+						? {}
+						: scenario === "complete" && i === 1
+							? [{ number: 101, state: "open" }]
+							: Array.from({ length: 100 }, (_, n) => ({
+									number: n + 1,
+									state: "closed",
+								})),
+			})),
+		);
+		try {
+			const result = nativeBlockersOf(
+				84,
+				{ nodes: [], totalCount: 101 },
+				w.seams.gh,
+			);
+			if (scenario === "complete") {
+				const edges = await result;
+				expect(edges).toHaveLength(101);
+				expect(edges[100]).toEqual({ number: 101, state: "OPEN" });
+			} else {
+				await expect(result).rejects.toThrow(
+					scenario === "malformed"
+						? "malformed native dependencies"
+						: "source-budget-exhausted: native dependency pagination",
+				);
+			}
+			expect(w.argvLog()).toHaveLength(
+				scenario === "complete" ? 2 : scenario === "malformed" ? 1 : 100,
+			);
+		} finally {
+			cleanupWorld(w);
+		}
+	});
+}
 
 test("assessment cancellation terminates an in-flight tracker subprocess", async () => {
 	const w = await makeWorld(84, "Readiness", [

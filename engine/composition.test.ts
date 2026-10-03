@@ -11,7 +11,7 @@ import {
 	cleanupWorld,
 	type GhRule,
 	makeWorld,
-	readyAssessment,
+	readyAssessmentFor,
 } from "./test-world.ts";
 
 const ISSUE = 66;
@@ -143,6 +143,23 @@ test.each([
 		const out: string[] = [];
 		const err: string[] = [];
 		try {
+			await world.git(["reset", "--hard", "origin/main"]);
+			fs.mkdirSync(path.join(world.checkout, "docs"));
+			fs.writeFileSync(
+				path.join(world.checkout, "AGENTS.md"),
+				"Captured root constraints",
+			);
+			fs.writeFileSync(
+				path.join(world.checkout, "docs/AGENTS.md"),
+				"Captured documentation constraints",
+			);
+			fs.writeFileSync(
+				path.join(world.checkout, "docs/README.md"),
+				"Documentation entry point",
+			);
+			await world.git(["add", "."]);
+			await world.git(["commit", "-m", "governing context"]);
+			expect((await world.git(["push", "origin", "main"])).exitCode).toBe(0);
 			await world.git([
 				"remote",
 				"set-url",
@@ -239,42 +256,52 @@ test.each([
 					config: { skillsRoot },
 					confinementRuntime: runtime,
 					assessment: {
-						sessionFactory: async () =>
-							session(
-								JSON.stringify({
-									status: "ready",
-									brief: {
-										...readyAssessment.brief,
-										intent: {
-											text: "Ship the Engine",
+						sessionFactory: async (request) => {
+							expect(request.prompt).toContain("Captured root constraints");
+							expect(request.prompt).toContain(
+								"Captured documentation constraints",
+							);
+							return session(
+								JSON.stringify(
+									readyAssessmentFor(
+										["issue:test/remote#66"],
+										{
+											command: "test -f candidate.txt",
+											verifies: "candidate is produced",
 											refs: ["issue:test/remote#66"],
 										},
-										scope: [
-											{
+										{
+											intent: {
 												text: "Ship the Engine",
 												refs: ["issue:test/remote#66"],
 											},
-										],
-										exclusions: [
-											{ text: "merge", refs: ["issue:test/remote#66"] },
-										],
-										acceptanceCriteria: [
-											{
-												text: "The CLI hands over an approved PR",
-												refs: ["issue:test/remote#66"],
-											},
-										],
-										decisions: [],
-										verifyCommands: [
-											{
-												command: "test -f candidate.txt",
-												verifies: "candidate is produced",
-												refs: ["issue:test/remote#66"],
-											},
-										],
-									},
-								}),
-							),
+											scope: [
+												{
+													text: "Ship the Engine",
+													refs: ["issue:test/remote#66"],
+												},
+											],
+											exclusions: [
+												{ text: "merge", refs: ["issue:test/remote#66"] },
+											],
+											acceptanceCriteria: [
+												{
+													text: "The CLI hands over an approved PR",
+													refs: ["issue:test/remote#66"],
+												},
+											],
+											decisions: [],
+											constraints: [
+												{
+													text: "Follow captured documentation constraints",
+													refs: ["repo:docs/AGENTS.md"],
+												},
+											],
+										},
+									),
+								),
+							);
+						},
 					},
 					cycle: { sessionFactory: implementer, confinementRuntime: runtime },
 					review: {
@@ -318,6 +345,9 @@ test.each([
 			for (const prompt of [...implementerPrompts, ...specPrompts])
 				expect(prompt).toContain(prepared);
 			expect(prepared).toContain("Settled conclusion");
+			expect(prepared).toContain("Captured root constraints");
+			expect(prepared).toContain("Captured documentation constraints");
+			expect(prepared).toContain("Prefer a small module");
 			expect(
 				world
 					.argvLog()

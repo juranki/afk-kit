@@ -26,6 +26,7 @@ import {
 	cleanupWorld,
 	type GhRule,
 	makeWorld,
+	readyAssessmentFor,
 	type World,
 } from "./test-world.ts";
 
@@ -145,6 +146,7 @@ interface RunOptions {
 	config?: ConfigPorts;
 	assessmentOutput?: string;
 	assessmentCapMs?: number;
+	git?: GitRunner;
 }
 
 /**
@@ -238,7 +240,7 @@ async function fixture(
 				},
 				ports: {
 					confinementRuntime: runtime.port,
-					git: offlineFetchGit(world),
+					git: options.git ?? offlineFetchGit(world),
 					config: { skillsRoot: skills.root, ...options.config },
 					assessment: {
 						capMs: options.assessmentCapMs,
@@ -249,46 +251,43 @@ async function fixture(
 							dispose: () => {},
 							getLastAssistantText: () =>
 								options.assessmentOutput ??
-								JSON.stringify({
-									status: "ready",
-									brief: {
-										intent: {
-											text: "Carry the settled intent",
+								JSON.stringify(
+									readyAssessmentFor(
+										["issue:juranki/afk-kit#60", "comments:juranki/afk-kit#60"],
+										{
+											command: "bun test",
+											verifies: "Requested behavior",
 											refs: ["comments:juranki/afk-kit#60"],
 										},
-										scope: [
-											{
-												text: "Bounded change",
-												refs: ["issue:juranki/afk-kit#60"],
-											},
-										],
-										exclusions: [
-											{
-												text: "Unrelated work",
-												refs: ["issue:juranki/afk-kit#60"],
-											},
-										],
-										acceptanceCriteria: [
-											{
-												text: "Settled behavior works",
+										{
+											intent: {
+												text: "Carry the settled intent",
 												refs: ["comments:juranki/afk-kit#60"],
 											},
-										],
-										constraints: [],
-										verifyCommands: [
-											{
-												command: "bun test",
-												verifies: "Requested behavior",
-												refs: ["comments:juranki/afk-kit#60"],
-											},
-										],
-										dependencies: [],
-										decisions: [],
-										repositoryContext: [],
-										guidance: [],
-										assumptions: [],
-									},
-								}),
+											scope: [
+												{
+													text: "Bounded change",
+													refs: ["issue:juranki/afk-kit#60"],
+												},
+											],
+											exclusions: [
+												{
+													text: "Unrelated work",
+													refs: ["issue:juranki/afk-kit#60"],
+												},
+											],
+											acceptanceCriteria: [
+												{
+													text: "Settled behavior works",
+													refs: ["comments:juranki/afk-kit#60"],
+												},
+											],
+											decisions: [],
+											repositoryContext: [],
+											guidance: [],
+										},
+									),
+								),
 						}),
 					},
 				},
@@ -310,13 +309,54 @@ function onlyRun(xdg: string): string {
 }
 
 describe("runImplement (L2)", () => {
-	test("a non-template Issue settled in comments prepares a brief before live Claim", async () => {
+	test("a narrow Issue with 70 unrelated instruction directories prepares a brief before live Claim", async () => {
 		const f = await fixture([
 			readinessRule("Please carry the change discussed below."),
 		]);
 		try {
+			await f.world.git(["reset", "--hard", "origin/main"]);
+			for (let i = 0; i < 70; i++) {
+				const directory = path.join(f.world.checkout, `unrelated-${i}`);
+				fs.mkdirSync(directory);
+				fs.writeFileSync(path.join(directory, "AGENTS.md"), "Unrelated rules");
+			}
+			for (const file of [
+				"AGENTS.md",
+				"package.json",
+				"README.md",
+				"docs/README.md",
+			]) {
+				fs.mkdirSync(path.dirname(path.join(f.world.checkout, file)), {
+					recursive: true,
+				});
+				fs.writeFileSync(
+					path.join(f.world.checkout, file),
+					file === "package.json"
+						? '{"scripts":{"test":"bun test"}}'
+						: "Root readiness context",
+				);
+			}
+			await f.world.git(["add", "."]);
+			await f.world.git(["commit", "-m", "large repository"]);
+			expect(
+				(await f.world.git(["push", f.world.bare, "HEAD:main"])).exitCode,
+			).toBe(0);
 			expect(await f.run()).toBe(1);
 			const dir = onlyRun(f.xdg);
+			const captured = JSON.parse(
+				fs.readFileSync(
+					path.join(dir, "artifacts/readiness/sources.json"),
+					"utf8",
+				),
+			);
+			expect(captured.sources.map((s: { id: string }) => s.id)).toEqual([
+				"issue:juranki/afk-kit#60",
+				"comments:juranki/afk-kit#60",
+				"repo:AGENTS.md",
+				"repo:README.md",
+				"repo:docs/README.md",
+				"repo:package.json",
+			]);
 			const events = readRunEvents(path.join(dir, "events.jsonl")).events;
 			expect(
 				events
@@ -466,7 +506,12 @@ describe("runImplement (L2)", () => {
 	});
 
 	test("malformed output, unavailable relevant evidence and exhausted budget refuse without Claim or cycles", async () => {
-		for (const failure of ["malformed", "unavailable", "timeout"]) {
+		for (const failure of [
+			"malformed",
+			"unavailable",
+			"timeout",
+			"instructions",
+		]) {
 			const f = await fixture([
 				readinessRule("Clear intent discussed in comments"),
 				...(failure === "unavailable"
@@ -482,9 +527,38 @@ describe("runImplement (L2)", () => {
 					: []),
 			]);
 			try {
+				if (failure === "instructions") {
+					await f.world.git(["reset", "--hard", "origin/main"]);
+					fs.mkdirSync(path.join(f.world.checkout, "docs"));
+					fs.writeFileSync(
+						path.join(f.world.checkout, "docs/AGENTS.md"),
+						"Required instructions",
+					);
+					fs.writeFileSync(
+						path.join(f.world.checkout, "docs/README.md"),
+						"Relevant entry point",
+					);
+					await f.world.git(["add", "."]);
+					await f.world.git(["commit", "-m", "scoped entry point"]);
+					expect(
+						(await f.world.git(["push", f.world.bare, "HEAD:main"])).exitCode,
+					).toBe(0);
+				}
+				const git = offlineFetchGit(f.world);
 				expect(
 					await f.run({
-						assessmentOutput: "not JSON",
+						assessmentOutput:
+							failure === "instructions" ? undefined : "not JSON",
+						git: (args, cwd, signal) =>
+							failure === "instructions" &&
+							args[0] === "show" &&
+							args[1]?.endsWith(":docs/AGENTS.md")
+								? Promise.resolve({
+										stdout: "",
+										stderr: "object unavailable",
+										exitCode: 1,
+									})
+								: git(args, cwd, signal),
 						assessmentCapMs: failure === "timeout" ? 1 : undefined,
 					}),
 				).toBe(1);
@@ -504,6 +578,19 @@ describe("runImplement (L2)", () => {
 					),
 				).toBe(false);
 				expect(f.world.argvLog().join("\n")).not.toContain("edit");
+				if (failure === "instructions") {
+					const captured = JSON.parse(
+						fs.readFileSync(
+							path.join(dir, "artifacts/readiness/sources.json"),
+							"utf8",
+						),
+					);
+					expect(captured.failures.join(";")).toContain("docs/AGENTS.md");
+					expect(captured.sources.map((s: { id: string }) => s.id)).toEqual([
+						"issue:juranki/afk-kit#60",
+						"comments:juranki/afk-kit#60",
+					]);
+				}
 				expect(
 					fs.readFileSync(
 						path.join(dir, "artifacts/readiness/assessment.json"),

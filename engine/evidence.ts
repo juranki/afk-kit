@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { GitRunner } from "../extensions/coordinator/git.ts";
 import type { GhRunner, ReadinessInput } from "../extensions/readiness/gh.ts";
+import { collectTrackerPages } from "../extensions/readiness/pagination.ts";
 import type { CapturedSource } from "./readiness.ts";
 
 interface CollectionOptions {
@@ -101,22 +102,22 @@ export async function collectEvidence(
 			throw new Error(`unavailable-evidence: ${endpoint}: ${r.stderr}`);
 		return JSON.parse(r.stdout);
 	};
-	const comments = async (repo: string, number: number): Promise<unknown[]> => {
-		const all: unknown[] = [];
-		for (let page = 1; page <= 100; page++) {
-			const batch = await json(
-				`repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`,
-			);
-			if (!Array.isArray(batch)) throw new Error("malformed tracker comments");
-			all.push(...batch);
-			if (
-				Buffer.byteLength(JSON.stringify(all)) > (options.maxBytes ?? 2_000_000)
-			)
-				throw new Error("source-budget-exhausted: comments");
-			if (batch.length < 100) return all;
-		}
-		throw new Error("source-budget-exhausted: comment pagination");
-	};
+	const comments = (repo: string, number: number): Promise<unknown[]> =>
+		collectTrackerPages({
+			readPage: (page) =>
+				json(
+					`repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`,
+				),
+			malformed: "malformed tracker comments",
+			exhausted: "source-budget-exhausted: comment pagination",
+			checkAccumulation: (all) => {
+				if (
+					Buffer.byteLength(JSON.stringify(all)) >
+					(options.maxBytes ?? 2_000_000)
+				)
+					throw new Error("source-budget-exhausted: comments");
+			},
+		});
 	const knownIssue = (repo: string, number: number): boolean => {
 		if (
 			repo === repository &&
@@ -148,6 +149,23 @@ export async function collectEvidence(
 					throw new Error(
 						`unavailable-evidence: untracked repository path ${file}`,
 					);
+				// Complete governing evidence before this read can succeed. Ancestors
+				// use the same pinned cache; skip self to keep instruction reads acyclic.
+				const directories = file.split("/").slice(0, -1);
+				for (let depth = 0; depth <= directories.length; depth++) {
+					const instruction = [
+						...directories.slice(0, depth),
+						"AGENTS.md",
+					].join("/");
+					if (
+						instruction !== file &&
+						snapshot.repositoryFiles.includes(instruction)
+					)
+						await read(
+							`repo:${instruction}`,
+							`Governing instructions for ${file}`,
+						);
+				}
 				const r = await git(
 					["show", `${revision}:${file}`],
 					cwd,
@@ -230,10 +248,8 @@ export async function collectEvidence(
 			throw new Error(`unavailable-evidence: repository tree: ${files.stderr}`);
 		snapshot.repositoryFiles = files.stdout.trim().split("\n").filter(Boolean);
 		persist();
-		for (const file of snapshot.repositoryFiles.filter(
-			(f) =>
-				/(^|\/)AGENTS\.md$/.test(f) ||
-				["package.json", "README.md", "docs/README.md"].includes(f),
+		for (const file of snapshot.repositoryFiles.filter((f) =>
+			["AGENTS.md", "package.json", "README.md", "docs/README.md"].includes(f),
 		))
 			await read(
 				`repo:${file}`,

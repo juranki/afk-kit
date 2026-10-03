@@ -1,6 +1,32 @@
 import { expect, test } from "bun:test";
 import { parseAssessment, renderPreparedBrief } from "./readiness.ts";
-import { readyAssessment } from "./test-world.ts";
+import { readyAssessment, readyAssessmentFor } from "./test-world.ts";
+
+test("shared Ready builder grounds defaults and preserves explicit scenario overrides", () => {
+	const fixture = readyAssessmentFor(
+		["issue:87"],
+		{ command: "bun run verify", verifies: "behavior", refs: ["issue:87"] },
+		{
+			constraints: [{ text: "Only relevant instructions", refs: ["issue:87"] }],
+			guidance: ["Not a Maintainer requirement"],
+			decisions: [],
+		},
+	);
+	const parsed = parseAssessment(
+		JSON.stringify(fixture),
+		[{ id: "issue:87", identity: "Issue 87", content: "Settled scope" }],
+		[],
+	);
+	expect(parsed.status).toBe("ready");
+	if (parsed.status !== "ready")
+		throw new Error("Expected grounded Ready fixture");
+	expect(parsed.brief.verifyCommands[0].command).toBe("bun run verify");
+	expect(parsed.brief.constraints).toEqual([
+		{ text: "Only relevant instructions", refs: ["issue:87"] },
+	]);
+	expect(parsed.brief.guidance).toEqual(["Not a Maintainer requirement"]);
+	expect(parsed.brief.decisions).toEqual([]);
+});
 
 const sources = [
 	{
