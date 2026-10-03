@@ -23,6 +23,22 @@ export interface PreparedBrief {
 	guidance: string[];
 	assumptions: string[];
 }
+const BINDING_FIELDS = [
+	"intent",
+	"scope",
+	"exclusions",
+	"acceptanceCriteria",
+	"constraints",
+	"verifyCommands",
+	"dependencies",
+	"decisions",
+] as const;
+const CONTEXT_FIELDS = [
+	"repositoryContext",
+	"guidance",
+	"assumptions",
+] as const;
+
 export type Assessment =
 	| { status: "ready"; brief: PreparedBrief }
 	| { status: "needs-clarification"; questions: GroundedStatement[] }
@@ -34,6 +50,11 @@ export function parseAssessment(
 	nativeDependencies: readonly number[],
 ): Assessment {
 	const ids = new Set(sources.map((s) => s.id));
+	const onlyKeys = (v: unknown, keys: readonly string[]): boolean =>
+		!!v &&
+		typeof v === "object" &&
+		!Array.isArray(v) &&
+		Object.keys(v).every((key) => keys.includes(key));
 	const nonempty = (v: unknown): v is string =>
 		typeof v === "string" && v.trim().length > 0;
 	const refs = (v: unknown): boolean =>
@@ -41,15 +62,23 @@ export function parseAssessment(
 		v.length > 0 &&
 		v.every((r) => nonempty(r) && ids.has(r));
 	const statement = (v: unknown): boolean =>
-		!!v &&
-		typeof v === "object" &&
+		onlyKeys(v, ["text", "refs"]) &&
 		nonempty((v as GroundedStatement).text) &&
 		refs((v as GroundedStatement).refs);
 	const statements = (v: unknown, required = false): boolean =>
 		Array.isArray(v) && (!required || v.length > 0) && v.every(statement);
 	const strings = (v: unknown): boolean =>
 		Array.isArray(v) && v.every(nonempty);
-	for (const candidate of candidatesOf(text)) {
+	// One owned handoff, not the last valid draft among conflicting outputs.
+	// Parse valid bare JSON directly (its strings may themselves contain fences).
+	let candidates = candidatesOf(text);
+	try {
+		JSON.parse(text);
+		candidates = [text];
+	} catch {
+		candidates = candidates.length === 2 ? [candidates[0]] : [];
+	}
+	for (const candidate of candidates) {
 		let value: Assessment;
 		try {
 			value = JSON.parse(candidate);
@@ -59,14 +88,25 @@ export function parseAssessment(
 		if (!value || typeof value !== "object") continue;
 		if (
 			value.status === "needs-clarification" &&
+			onlyKeys(value, ["status", "questions"]) &&
 			statements(value.questions, true)
 		)
 			return value;
-		if (value.status === "assessment-failure" && nonempty(value.reason))
+		if (
+			value.status === "assessment-failure" &&
+			onlyKeys(value, ["status", "reason"]) &&
+			nonempty(value.reason)
+		)
 			return value;
-		if (value.status !== "ready" || !value.brief) continue;
+		if (
+			value.status !== "ready" ||
+			!onlyKeys(value, ["status", "brief"]) ||
+			!value.brief
+		)
+			continue;
 		const b = value.brief;
 		if (
+			!onlyKeys(b, [...BINDING_FIELDS, ...CONTEXT_FIELDS]) ||
 			!statement(b.intent) ||
 			!statements(b.scope, true) ||
 			!statements(b.exclusions, true) ||
@@ -83,7 +123,7 @@ export function parseAssessment(
 			b.verifyCommands.length === 0 ||
 			!b.verifyCommands.every(
 				(c) =>
-					c &&
+					onlyKeys(c, ["command", "verifies", "refs"]) &&
 					nonempty(c.command) &&
 					!/[\r\n]/.test(c.command) &&
 					nonempty(c.verifies) &&
@@ -95,7 +135,10 @@ export function parseAssessment(
 			!Array.isArray(b.dependencies) ||
 			!b.dependencies.every(
 				(d) =>
-					d && Number.isSafeInteger(d.number) && d.number > 0 && refs(d.refs),
+					onlyKeys(d, ["number", "refs"]) &&
+					Number.isSafeInteger(d.number) &&
+					d.number > 0 &&
+					refs(d.refs),
 			)
 		)
 			continue;
@@ -147,12 +190,7 @@ export function renderPreparedBrief(
 		"",
 		"## Binding prepared requirements and provenance",
 		JSON.stringify(
-			{
-				...brief,
-				guidance: undefined,
-				assumptions: undefined,
-				repositoryContext: undefined,
-			},
+			Object.fromEntries(BINDING_FIELDS.map((key) => [key, brief[key]])),
 			null,
 			2,
 		),

@@ -76,7 +76,8 @@ const OUTPUT_CONTRACT = `Return one JSON object, optionally fenced:
 All binding statement lists use {text,refs}. Empty lists are allowed only for constraints, dependencies, decisions, repositoryContext, guidance and assumptions. Dependencies list only native blocked-by prerequisites, not issues this work blocks or merely references.
 Or {"status":"needs-clarification","questions":[{"text":"specific unresolved human question or discrepancy","refs":["source ID"]}]}
 Or {"status":"assessment-failure","reason":"unavailable evidence or inability to assess"}.
-References MUST use captured source IDs, never uncaptured URLs. Guidance is not binding.`;
+References MUST use captured source IDs, never uncaptured URLs. The repository file inventory is navigation only: a repo:path reference is valid only when the source is already captured or read_evidence has returned it, not merely because the path exists or is mentioned. Use only the fields in this contract, with no additional keys. Guidance is not binding.
+repositoryContext, guidance and assumptions are arrays of strings only, never {text,refs} objects. Put provenance on binding statements and commands as shown; keep non-binding context in plain strings.`;
 
 export async function assessReadiness(
 	options: AssessmentOptions,
@@ -146,8 +147,9 @@ export async function assessReadiness(
 				capMs,
 				prompt: [
 					"Assess this captured discussion once. Selectively gather relevant evidence using read_evidence, then produce the prepared brief or refusal.",
-					OUTPUT_CONTRACT,
 					JSON.stringify(evidence.snapshot()),
+					OUTPUT_CONTRACT,
+					"Keep the handoff concise while complete. Your task is complete only when your final message contains the complete structured JSON assessment; a prose readiness conclusion is not a handoff.",
 				].join("\n\n"),
 			},
 			{ createSession: guardedFactory, interruption },

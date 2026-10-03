@@ -97,6 +97,15 @@ test("assessment prepares a grounded brief from comments without consuming a cyc
 					}),
 				prompt: async () => {
 					expect(request.prompt).toContain("Non-template intent");
+					expect(request.prompt).toContain(
+						"repositoryContext, guidance and assumptions are arrays of strings only",
+					);
+					expect(request.prompt).toContain(
+						"The repository file inventory is navigation only",
+					);
+					expect(request.prompt.trim()).toEndWith(
+						"Your task is complete only when your final message contains the complete structured JSON assessment; a prose readiness conclusion is not a handoff.",
+					);
 				},
 			}),
 		});

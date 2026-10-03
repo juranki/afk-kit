@@ -93,8 +93,8 @@ Assessment (including collection/session creation) has a 15-minute maximum, addi
 bounded by the remaining Run deadline; timeout cancels tracker/repository reads and
 aborts the session, without Claim or implementation-cycle consumption.
 
-Canonical `bun run verify`: **PASS** — final sweep: 406 tests across 33 files,
-1,447 assertions; the initial complete sweep passed 404 tests / 1,441 assertions;
+Canonical `bun run verify`: **PASS** — final sweep: 409 tests across 33 files,
+1,455 assertions; the initial complete sweep passed 404 tests / 1,441 assertions;
 Biome checked 75 files; Knip passed; the change-gated drift reviewer agreed and
 refreshed `scripts/drift-corpus.sha256`. The first full invocation hit the harness's
 120-second command limit while the model-backed drift review was still running;
@@ -117,4 +117,44 @@ findings. Standards identified a stale confinement-smoke anchor (fixed) and non-
 refactoring heuristics; Spec identified an artifact reference that could name an absent
 source file on early budget refusal (fixed by referencing the existing stage directory).
 Review-stage tests additionally hardened partial-page evidence retention and explicit
-post-Claim contradiction Escalation. A final pass reviews those deltas before PR handoff.
+post-Claim contradiction Escalation. Both complete-diff follow-up reviews approved
+`f590869`; Standards retained four non-blocking refactoring heuristics, and Spec
+retained one informational note about closed-dependency agreement checks.
+
+Final artifact-hardening tests exposed two unsafe acceptance paths: unknown fields
+could appear under binding requirements, and a malformed final JSON draft could fall
+back to an earlier Ready draft. The validator now accepts one owned artifact with
+only declared fields; binding rendering projects explicit known fields. Bare JSON
+and one fenced artifact remain supported. Prompt tests also pin completion and
+source-reference rules after the evidence packet (file inventories are navigation,
+not captured content). These final deltas receive a separate parallel review.
+
+## Final live confirmations
+
+Raw receipts are retained under
+`/home/juhani.guest/.local/state/afk-kit-issue84-evidence/tmp/`:
+
+| Scenario | Directory | Result | Sources |
+| --- | --- | --- | --- |
+| Real #84, grounded in captured `43dd670` | `afk-readiness-smoke-Q42Q7u` | Ready | 15 |
+| Settled discussion, historical alternatives, differing code/tests | `afk-readiness-settled-vfZNss` | Ready | 6 |
+| Unresolved product choice | `afk-readiness-unresolved-PK9tU0` | needs-clarification | 6 |
+| Missing native dependency edge | `afk-readiness-missing-edge-RUI2A8` | needs-clarification | 6 |
+
+Real #84's prepared-brief Markdown SHA-256:
+`393ccd65a3c01c678a70c8736f26da4bcb1f1073299dc81f1a1525ab20c0afca`.
+All five positive/clarification receipts (including the initial real #84 Ready receipt)
+were replay-validated against the final strict validator without changing captured data.
+
+Earlier independent development smokes also exercised fail-closed model-output paths:
+wrong field shapes (`afk-readiness-smoke-I2ZfRy`), invalid JSON
+(`afk-readiness-smoke-m4pQEI`), and an uncaptured file reference
+(`afk-readiness-smoke-PFps99`) all returned assessment-failure, with sources and raw
+output retained. No JSON repair, Claim, or within-Run reassessment occurred. Prompt
+clarifications improved completion/provenance guidance; malformed output still refuses.
+
+Concurrent complete SDK traces exhausted the host's 1.5 GB `/tmp` tmpfs during one
+verification attempt. Generated traces were preserved on persistent storage (old
+receipt paths remain symlinks), and subsequent smokes used that storage via `TMPDIR`.
+This was an environment/storage failure, not a hidden successful smoke; repository
+and tracker state remained unchanged.

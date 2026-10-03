@@ -36,6 +36,45 @@ test("rejects malformed output, ungrounded requirements, and missing commands di
 	}
 });
 
+test("unknown artifact fields cannot smuggle ungrounded binding requirements into the handoff", () => {
+	for (const brief of [
+		{
+			...readyAssessment.brief,
+			inventedRequirement: "Rewrite the unrelated UI",
+		},
+		{
+			...readyAssessment.brief,
+			intent: {
+				...readyAssessment.brief.intent,
+				mandatoryApproach: "Use a new framework",
+			},
+		},
+	]) {
+		expect(
+			parseAssessment(JSON.stringify({ status: "ready", brief }), sources, [])
+				.status,
+		).toBe("assessment-failure");
+	}
+});
+
+test("accepts one fenced handoff without confusing its envelope with the JSON artifact", () => {
+	const raw = `Grounding complete.\n\`\`\`json\n${JSON.stringify(readyAssessment)}\n\`\`\``;
+	expect(parseAssessment(raw, sources, []).status).toBe("ready");
+});
+
+test("a malformed final handoff cannot fall back to an earlier Ready draft", () => {
+	for (const final of [
+		"{broken",
+		JSON.stringify({
+			status: "ready",
+			brief: { ...readyAssessment.brief, inventedRequirement: "Unproven" },
+		}),
+	]) {
+		const raw = `\`\`\`json\n${JSON.stringify(readyAssessment)}\n\`\`\`\n\`\`\`json\n${final}\n\`\`\``;
+		expect(parseAssessment(raw, sources, []).status).toBe("assessment-failure");
+	}
+});
+
 test("dependency discrepancies need clarification even for closed native dependencies", () => {
 	expect(
 		parseAssessment(JSON.stringify(readyAssessment), sources, [83]).status,
