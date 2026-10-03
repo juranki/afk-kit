@@ -38,6 +38,20 @@ export function checkTriageLabels(labels: string[]): Inspection {
 						.join("; "),
 	};
 }
+/** Labels applied by Claim, PR handoff, and Escalation, not issue triage state. */
+export function checkRepositoryLabels(labels: string[]): Inspection {
+	const missing = ["in-progress", "in-review", "needs-info"].filter(
+		(label) => !labels.includes(label),
+	);
+	return {
+		name: "repository-labels",
+		pass: missing.length === 0,
+		detail:
+			missing.length === 0
+				? "AFK workflow labels exist: in-progress, in-review, needs-info"
+				: `missing repository labels: ${missing.join(", ")}. In the target repository, run: ${missing.map((label) => `gh label create "${label}"`).join("; ")}. Pocock / Wayfinder setup alone does not provision AFK workflow labels.`,
+	};
+}
 export function verifyCommandList(value: string): string[] {
 	return value
 		.split("\n")
