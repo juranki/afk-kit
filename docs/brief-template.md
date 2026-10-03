@@ -1,59 +1,74 @@
-# Agent brief template
+# Agent brief standard
 
-A ticket may carry the `ready-for-agent` label only when every field below is satisfied
-and **Open questions** is empty. This template extends the brief conventions of the
-installed `triage` skill (`AGENT-BRIEF.md`); where that skill's guidance and this
-template disagree, this template wins for issues destined for afk-kit coordinators.
+Human-owned source intent lives in the Issue discussion and linked decisions, not in
+mandatory template syntax. Preparation and triage establish semantic clarity; the
+[Readiness check](adr/0016-agentic-readiness-and-prepared-brief.md) synthesizes a
+separate immutable Agent brief on invocation. Missing headings do not justify refusal.
+This standard governs that prepared handoff, not the author's Issue formatting.
 
-Apply it in the target repository's tracker so the brief travels with the issue.
+## Prepared brief contents
 
-## The fields
-
-| Field | Must satisfy |
+| Content | Contract |
 | --- | --- |
-| **Summary** | One or two sentences in the target repo's domain vocabulary. A stranger could say what changes. |
-| **Acceptance criteria** | Behavior-level and verifiable. Each criterion is independently checkable and becomes a PR checklist item. |
-| **Verify commands** | At least one command — a ticket without one is ready for a human, not an agent. The exact commands (build, test, lint) whose passing defines done. The implementer runs these; the maintainer can rerun them. For afk-kit's own tickets the default citation is `bun install && bun run verify` ([code verify standard](conventions/code-verify.md)); the [package verify commands](conventions/package-verify.md) are the reusable precedent for target repos and package work. |
-| **Blocked by / blocks** | Every edge to other tickets. Missing edges make the claimable lie. |
-| **Touched areas** | Files, directories, and the relevant ontologies, ADRs, or stories the change may touch. Declares the blast radius the reviewer checks against. |
-| **Out of scope** | What this ticket deliberately does not do. Keeps implementers from gold-plating past the chosen edge. |
-| **Open questions** | Must be **empty**. If anything is unresolved, the ticket is not ready for an agent: keep it in `needs-info` (maintainer decides) or `ready-for-human` (human implements). |
+| Intent, scope, exclusions | Clear outcome and bounded work, using the repository's domain vocabulary. |
+| Acceptance criteria | Meaningful, verifiable consequences of settled intent; derivation is allowed, invention of product decisions is not. |
+| Verify commands | At least one concrete command, what it verifies, and provenance in repository guidance/configuration or settled intent. For afk-kit the default is `bun install && bun run verify` ([code verify standard](conventions/code-verify.md)); see also [package verification](conventions/package-verify.md). |
+| Dependencies and decisions | Understood dependencies agreeing with native edges, and necessary decisions settled by the captured discussion. |
+| Repository context | Relevant files, interfaces, patterns, tests, and governing constraints; targeted evidence, not an architectural audit. |
+| Guidance and assumptions | Separately identified likely touch points, suggested approaches, and assumptions for the Implementer to validate. |
+| Provenance | References tying binding requirements to captured evidence; source identities and repository revision persist with the Run. |
 
-## Skeleton
+## Authority
+
+**Binding:** settled intent, scope, acceptance criteria, constraints, and established
+Verify commands. **Non-binding:** repository findings, likely touch points, suggested
+approaches, and assumptions. Guidance does not acquire Maintainer authority by being
+included in the brief. In particular, likely touched areas are not automatically a
+binding path allowlist.
+
+The Implementer and Spec Reviewer receive the same prepared brief and access to
+captured evidence. The Implementer need not repeat broad discovery, but inspects code
+it changes and validates assumptions. Departures from guidance need evidence;
+requirements cannot be altered. Later meaningful contradictions Escalate rather than
+being silently reinterpreted. Spec Review must not promote recommendations into
+Maintainer requirements.
+
+## Verification and snapshot
+
+Readiness does not execute commands or prove the unchanged baseline green. Surface
+known unavailable credentials/infrastructure that would prevent verification. The
+Engine executes the immutable Verify commands independently after implementation.
+
+Capture sources once after invocation and persist them, their references/identities,
+repository revision, assessment output, and the prepared brief. No subsequent
+content-freshness gate or automatic reassessment is imposed in v0. Live labels,
+blockers, and Claim exclusion remain separate coordination safeguards. Output
+structure validation applies to the agent's artifact, never the Issue author's syntax.
+
+## Optional source-authoring aid
+
+Preparation skills may use this outline or their own format. Its absence is not a
+readiness failure, and it adds no mandatory planning assessment/comment step:
 
 ```markdown
-## Agent brief
+## Intended outcome
+<what changes and why>
 
-**Summary:** <one or two sentences>
+## Scope and exclusions
+<bounds and deliberate non-goals>
 
-**Acceptance criteria:**
-- [ ] <verifiable behavior>
-- [ ] <verifiable behavior>
+## Acceptance criteria
+- <verifiable behavior>
 
-**Verify commands:**
-- `<command>`
-- `<command>`
+## Verification
+<known commands and references, if established>
 
-**Blocked by:** #<n>, #<n>
-**Blocks:** #<n>
+## Dependencies and settled decisions
+<links; keep semantic dependencies consistent with native edges>
 
-**Touched areas:** <paths>, <ontology/ADR/story references>
-
-**Out of scope:** <what this ticket does not do>
-
-**Open questions:** none
+## Context
+<relevant discussion, repository guidance, known assumptions>
 ```
 
-## Relationship to the workflow
-
-- Satisfying this template is the exit criterion of a planning session's slice (see the
-  [planning playbook](playbooks/planning-session.md)) — there is no other gate.
-- The [readiness check](adr/0012-brief-enforcement-readiness-check.md) verifies this
-  template mechanically — fields present, Open questions empty, label consistent,
-  blocked-by edges matching the tracker's native dependencies — before `ready-for-agent`
-  is applied and again at claim ([ADR 0012](adr/0012-brief-enforcement-readiness-check.md)).
-  It is a structural check: whether criteria are truly verifiable stays with the
-  planning session and the reviewer.
-- The reviewer and the maintainer both read the brief against the diff: the checklist
-  items come from **Acceptance criteria**, and the surprise test comes from
-  **Touched areas** (see the [merge-gate story](../system-intent/stories/landing-a-change-under-the-merge-gate.md)).
+See the [planning playbook](playbooks/planning-session.md) for preparation and
+[Coordinator playbook](playbooks/coordinator-session.md) for invocation.

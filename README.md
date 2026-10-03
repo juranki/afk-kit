@@ -9,18 +9,19 @@ attention only where it is decisive: a human **starts** each piece of work and
 ## The workflow
 
 1. **Planning session** (human-led): issues from GitHub are triaged and specified into
-   *tickets* — issues with a complete **agent brief** (summary, acceptance criteria,
-   verify commands, blockers, touched areas, no open questions), enforced by a
-   readiness check. See the
+   *tickets* — Issues with clear, bounded intent and understood dependencies.
+   `ready-for-agent` records preparation/triage judgment, not guaranteed acceptance
+   by `afk`; no source template or two-pass label gate is required. See the
    [planning playbook](docs/playbooks/planning-session.md).
-2. **Coordinator session** (one per issue, on explicit command): runs a readiness
-   check, *claims* the ticket, creates a worktree + branch, then delegates. See the
-   [coordinator playbook](docs/playbooks/coordinator-session.md); its shipped runtime
-   form is the [`coordinator` skill](skills/coordinator/SKILL.md).
-   - an **implementer** subagent (cheap `flash` model) writes and verifies the change —
-     it can commit locally but is *confined*: it cannot push, run `gh`, or publish;
-   - the coordinator pushes and opens a pull request;
-   - a **reviewer** subagent returns a structured verdict; at most two fix rounds.
+2. **Coordinator Run** (one per Issue, explicit `afk implement <issue-number>`):
+   [semantic readiness](docs/adr/0016-agentic-readiness-and-prepared-brief.md) assesses
+   captured discussion and repository evidence, preparing an immutable Agent brief
+   before Claim. Human-owned intent remains authoritative; implementation guidance
+   is not a requirement. See the [Coordinator playbook](docs/playbooks/coordinator-session.md).
+   - a confined **Implementer** writes and commits locally, never publishes;
+   - the Engine executes independent Verify and pushes the candidate draft PR;
+   - independent Standards and Spec Reviews gate handoff within three
+     Implement–Review Cycles. Only the Maintainer merges.
 3. **Merge gate** (human): on approval the coordinator stops and the maintainer reviews
    and merges. Any failure or stuck loop **escalates** loudly instead of continuing
    silently.
@@ -33,7 +34,7 @@ The vocabulary and invariants of this workflow live in the
 | Path | What it is |
 | --- | --- |
 | [`system-intent/`](system-intent/) | Model frame: the [Agent Delivery Workflow ontology](system-intent/ontologies/agent-delivery-workflow.md) (terms + invariants), fictional characters, and user stories that pressure-test the design |
-| [`docs/`](docs/) | 13 ADRs, playbooks (planning/coordinator sessions), conventions (issue lifecycle, branching, review/escalation, code-verify) |
+| [`docs/`](docs/) | ADRs, playbooks, conventions, and implementation requirements |
 | [`skills/`](skills/) | The outgoing `coordinator` skill, pending reconciliation under the pivot map ([ADR 0013](docs/adr/0013-coordinator-skill-carries-judgment-agentic-drift-review.md)) |
 | [`extensions/`](extensions/) | Deterministic readiness and coordinator-operation extensions; the merge-guard extension was retired by [ticket #49](https://github.com/juranki/afk-kit/issues/49), the vendored `subagent` extension by [ticket #41](https://github.com/juranki/afk-kit/issues/41) |
 | [`prototype/`](prototype/), [`scripts/`](scripts/) | Throwaway prototypes and verification support |
@@ -47,14 +48,14 @@ is moving orchestration into a traceable coordinator engine on a guard-rail stac
 
 ## Status
 
-**Pivot in progress.** Implementation of the toolkit happens in this repository
-([ADR 0010](docs/adr/0010-retire-the-design-only-policy.md)). The vendored `subagent`
-extension, demo prompts, and packaged agent roster have been removed; the package does
-not currently provide delegation. [Map: The pivot — deterministic coordinator on a
-guard-rail stack](https://github.com/juranki/afk-kit/issues/43) is replacing the outgoing
-agentic coordinator path with an SDK-driven CLI. ADR 0007 and the existing coordinator
-playbook remain historical/current-design context until the map's reconciliation work
-records the pivot.
+**Pivot in progress.** The SDK-driven Engine CLI is implemented; its real proof Run
+is still pending under [Map: The pivot — deterministic coordinator on a guard-rail
+stack](https://github.com/juranki/afk-kit/issues/43). Semantic readiness is the confirmed
+contract, **not yet the shipped runtime**: the current body-template check awaits
+[Task: implement and verify agentic readiness and prepared briefs](https://github.com/juranki/afk-kit/issues/84).
+The outgoing Coordinator skill is not packaged. Broader historical pivot records
+remain with [Task: reconcile the record — ADRs, ontology, AGENTS.md,
+playbooks](https://github.com/juranki/afk-kit/issues/53).
 
 Start with [system-intent/README.md](system-intent/README.md), the model frame;
 [docs/README.md](docs/README.md) routes everything else.

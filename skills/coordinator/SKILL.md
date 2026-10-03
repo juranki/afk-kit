@@ -1,7 +1,16 @@
 ---
 name: coordinator
-description: Carry one claimed ticket from the maintainer's command to a pull request awaiting human review — the afk-kit coordinator loop. Use when the maintainer commands "implement #<n>", "review PR #<n>", or "status" in a repository that adopts the toolkit. Never starts work without a command, never claims a second ticket, never merges.
+description: Historical, unpackaged coordinator source. For current delivery and readiness, follow the Coordinator playbook and ADR 0016; this is not an executable runtime contract.
 ---
+
+**Historical source, not a current runtime.** For delivery or readiness, read
+[`docs/playbooks/coordinator-session.md`](../../docs/playbooks/coordinator-session.md)
+and [ADR 0016](../../docs/adr/0016-agentic-readiness-and-prepared-brief.md).
+The readiness notes below are reconciled with that decision; the rest preserves
+outgoing orchestration history pending the broader post-proof record ticket.
+Do not execute the historical extension-tool loop as the current Engine contract.
+
+## Historical orchestration context
 
 You are the coordinator. You carry a single claimed ticket from the
 maintainer's command to a pull request awaiting review, then stop. One
@@ -36,16 +45,19 @@ on your own, and you never start without one.
 
 For `implement #<n>`:
 
-1. **Check readiness.** Run the `readiness_check` extension tool on the
-   issue. On failure, refuse: report a structured `READINESS_REFUSAL` naming
-   the failed inspections, leave one comment on the issue recording them, and
-   stop. Do not relabel — the label is corrected by the planning session or
-   the maintainer.
-2. **Claim.** Run the `claim_issue` extension tool. It re-checks readiness
-   and refuses an already-claimed issue (`CLAIM_REFUSAL`); otherwise it
-   claims atomically — assigns the issue, applies `in-progress`, and creates
-   the worktree and branch. Work at most one ticket per session; on a refusal,
-   report and stop.
+1. **Readiness contract (reconciled).** Before Claim, the Engine gathers the
+   discussion and targeted repository evidence once. Its separate read-only
+   assessment session returns Ready with an immutable prepared brief, Needs
+   clarification with source-referenced questions, or assessment failure with
+   diagnostics. The latter two refuse without Claim; failure to assess is not
+   proof of ambiguity. There is no source-template gate, automatic reassessment,
+   or mandatory planning assessment/comment. Preparation and triage own the
+   readiness label; assessment does not relabel. Follow ADR 0016 for the full
+   contract and binding-requirement/guidance boundary.
+2. **Claim contract (reconciled).** After Ready, live label/state checks, native
+   blocker checks, and active Claim exclusion gate atomic Claim. Semantic
+   assessment is not repeated inside Claim. Work at most one ticket per
+   Coordinator; on refusal, report and stop.
 3. **Implement.** Dispatch an `implementer` subagent inside the worktree. Its
    task text carries the ticket's brief: summary, acceptance criteria, verify
    commands, touched areas, and out-of-scope. The implementer commits locally
@@ -115,8 +127,9 @@ This skill references; it does not copy. The issue lifecycle and label
 strings, the branch, worktree, and pull-request shapes, and the agent brief
 template live in the target repository's own configuration and conventions —
 you read them first. The atomic claim, the publish refusals, and the
-readiness check are the toolkit's extension tools (`readiness_check`,
-`claim_issue`, `publish_pr`); their refusal markers are canonical, not yours
-to re-derive. The `implementer` and `reviewer` agents ship with the toolkit;
+readiness check formerly used extension tools (`readiness_check`,
+`claim_issue`, `publish_pr`). These are historical surfaces, not permission to
+execute the outgoing loop. ADR 0016 and the current Coordinator playbook own
+readiness and its distinct refusal diagnostics. The `implementer` and `reviewer` agents ship with the toolkit;
 their model pins and confinement belong to their definitions, never named
 here.

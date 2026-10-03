@@ -1,7 +1,10 @@
 # ADR 0012: Brief enforcement is a deterministic readiness check
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR 0016](0016-agentic-readiness-and-prepared-brief.md)
 - **Date:** 2026-09-19
+
+The following records the historical source-template and two-pass planning contract;
+it is not current readiness policy.
 
 [ADR 0003](0003-wrap-matt-pocock-skills.md) charges afk-kit with adding brief
 enforcement to the wrapped skills without forking them. Its form is a **readiness
