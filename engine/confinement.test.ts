@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -207,6 +208,73 @@ describe("task confinement at the process seam (L2)", () => {
 		expect(delegatedEnv?.ANTHROPIC_API_KEY).toBeUndefined();
 		expect(delegatedEnv?.SSH_AUTH_SOCK).toBeUndefined();
 		expect(delegatedEnv?.BASH_ENV).toBeUndefined();
+	});
+
+	test("provides disposable tool caches and temp space outside the worktree", async () => {
+		const worktree = scratchWorktree();
+		const confinement = await createTaskConfinement(
+			{ worktree, writablePaths: ["."], allowedDomains: [] },
+			{ runtime: fakeRuntime().port },
+		);
+		let output = "";
+		try {
+			const result = await confinement.operations.exec(
+				'printf "%s\\n" "$TMPDIR" "$GOCACHE" "$GOMODCACHE"; touch "$TMPDIR/probe"; mkdir "$GOMODCACHE/readonly"; touch "$GOMODCACHE/readonly/file"; chmod 555 "$GOMODCACHE/readonly"; git config --global --list',
+				worktree,
+				{
+					env: process.env,
+					onData: (chunk) => {
+						output += chunk.toString();
+					},
+				},
+			);
+			expect(result.exitCode).toBe(0);
+			const directories = output.trim().split("\n");
+			expect(directories).toHaveLength(3);
+			for (const directory of directories) {
+				expect(directory.startsWith(`${worktree}/`)).toBe(false);
+				expect(fs.statSync(directory).isDirectory()).toBe(true);
+				expect(
+					confinement.config.filesystem.allowWrite.some((root) =>
+						directory.startsWith(`${root}/`),
+					),
+				).toBe(true);
+			}
+			await confinement.dispose();
+			for (const directory of directories)
+				expect(fs.existsSync(directory)).toBe(false);
+		} finally {
+			await confinement.dispose();
+		}
+	});
+
+	test("refuses example aliases introduced after task initialization", async () => {
+		const worktree = scratchWorktree();
+		execFileSync("git", ["init", "-q", worktree]);
+		fs.writeFileSync(path.join(worktree, ".env"), "SECRET=never-read");
+		fs.writeFileSync(path.join(worktree, ".env.example"), "PUBLIC=placeholder");
+		execFileSync("git", ["-C", worktree, "add", ".env.example"]);
+		const confinement = await createTaskConfinement(
+			{
+				worktree,
+				writablePaths: ["."],
+				allowedDomains: [],
+				nonSecretExamples: [".env.example"],
+			},
+			{ runtime: fakeRuntime().port },
+		);
+		try {
+			fs.unlinkSync(path.join(worktree, ".env.example"));
+			fs.symlinkSync(".env", path.join(worktree, ".env.example"));
+			await expect(
+				confinement.operations.exec("cat .env.example", worktree, {
+					onData: () => {},
+				}),
+			).rejects.toThrow("without aliases");
+		} finally {
+			await confinement.dispose();
+			fs.rmSync(worktree, { recursive: true, force: true });
+		}
 	});
 
 	test("refuses a spawn whose cwd escapes the worktree before wrapping it", async () => {

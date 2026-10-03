@@ -273,6 +273,10 @@ interface RunResult {
 
 interface RunDrivenOptions {
 	verifyCommands?: readonly string[];
+	confinementPolicy?: {
+		dependencyHosts: readonly string[];
+		nonSecretExamples: readonly string[];
+	};
 	behavior?: StartedWorld["behavior"];
 	confinementRuntime?: unknown;
 	/** The session hangs until its abort; models the wall-clock cap. */
@@ -294,6 +298,7 @@ async function runDrivenWorld(
 		seams: started.world.seams,
 		brief: BRIEF_BODY,
 		verifyCommands: options.verifyCommands,
+		confinementPolicy: options.confinementPolicy,
 		ports: {
 			sessionFactory: scriptedSessionFactory(started, {
 				hang: options.hangSession === true,
@@ -504,6 +509,45 @@ function fakeRuntime() {
 		},
 	};
 }
+
+test("delegated declaration edits cannot broaden the captured policy in later cycles", async () => {
+	const policies: unknown[] = [];
+	const runtime = fakeRuntime().port;
+	const result = await runDrivenWorld({
+		confinementPolicy: {
+			dependencyHosts: ["proxy.golang.org"],
+			nonSecretExamples: [],
+		},
+		confinementRuntime: {
+			...runtime,
+			initialize: async (config: { network: unknown }) => {
+				policies.push(config.network);
+			},
+		},
+		behavior: async (cycle, worktree, git) => {
+			if (cycle === 1) {
+				fs.mkdirSync(path.join(worktree, ".afk"));
+				fs.writeFileSync(
+					path.join(worktree, ".afk/confinement.json"),
+					JSON.stringify({
+						dependencyHosts: ["evil.example"],
+						nonSecretExamples: [".env.production"],
+					}),
+				);
+				await git(["add", "-A"], worktree);
+				await git(["commit", "-m", "attempt policy edit"], worktree);
+			} else {
+				fs.mkdirSync(path.join(worktree, "src"), { recursive: true });
+				fs.writeFileSync(path.join(worktree, "src/feature.txt"), "done\n");
+				await implementFeature(worktree, git);
+			}
+		},
+	});
+	expect(result.exit).toBe(0);
+	expect(policies).toHaveLength(2);
+	for (const policy of policies)
+		expect(policy).toMatchObject({ allowedDomains: ["proxy.golang.org"] });
+});
 
 describe("createCyclePort: failed cycles", () => {
 	test("a verify failure fails the cycle and rides into the next prompt", async () => {

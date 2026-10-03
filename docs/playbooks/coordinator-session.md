@@ -18,7 +18,10 @@ playbooks](https://github.com/juranki/afk-kit/issues/53).
 
 ## Before Claim
 
-1. **Preflight and collection.** Validate deterministic start prerequisites. Gather
+1. **Preflight and collection.** Validate deterministic start prerequisites, including
+   confined tool writes/Git and, when root `go.mod` exists, cold Go acquisition/build
+   capability per the [confinement policy](../conventions/implementer-confinement.md).
+   Gather
    the Issue body, all comments, native dependencies, relevant linked Issues/decisions,
    repository instructions, and targeted affected code/tests/docs once after
    invocation. Follow relevant links selectively, not through an unbounded crawl.
