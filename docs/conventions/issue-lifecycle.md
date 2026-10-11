@@ -17,8 +17,28 @@ below assume GitHub; per-repo mappings live in each repo (tenant-kit:
 | In progress | `in-progress` | coordinator (claim) | Claimed and being implemented. |
 | In review | `in-review` | coordinator (PR opened) | Pull request open; review loop or human review under way. |
 
-Repos must create every label they use — tenant-kit currently lacks `needs-info`,
-`ready-for-human`, `in-progress`, and `in-review` on GitHub.
+## Target repository setup
+
+Repos must create every label they use. Matt Pocock / Wayfinder setup provisions
+triage labels, but does not provision AFK's `in-progress` and `in-review` workflow
+labels. AFK also applies `needs-info` during Escalation; ensure it exists even if
+triage setup was run previously.
+
+Inspect the target repository's labels with `gh label list` (or `gh label list
+--limit 1000` for a large label set). From that repository's checkout, run only the
+commands for labels that are missing:
+
+```bash
+gh label create "in-progress"
+gh label create "in-review"
+gh label create "needs-info"
+```
+
+Implementation preflight reads the repository's complete label list and refuses
+before semantic Readiness or Claim if any of these three labels are missing. It
+reports all missing names together with setup commands. It never creates or alters
+repository labels, and existing labels do not replace the Issue's triage-state or
+live Claim checks.
 
 ## Transitions
 
