@@ -18,6 +18,7 @@ and end-to-end proof Run remain in progress.
 | How to run a coordinator session (one issue, command to pull request) | Playbooks | [Coordinator session](playbooks/coordinator-session.md) |
 | Which label or state an issue carries, and who may move it | Conventions | [Issue lifecycle](conventions/issue-lifecycle.md) |
 | How branches, worktrees, and pull requests are named and shaped | Conventions | [Branching and PRs](conventions/branching-and-prs.md) |
+| How confined Implementer tools acquire dependencies and use caches safely | Convention | [Implementer tool environment](conventions/implementer-confinement.md) |
 | How afk-kit's own code is proven — test-first order, layers, toolchain | Conventions | [Code verify standard](conventions/code-verify.md) |
 | What happens on review findings, repeated failure, or a blocked ticket | Conventions | [Review and escalation](conventions/review-and-escalation.md) |
 | How human source intent becomes an immutable prepared handoff | Brief standard | [Agent brief standard](brief-template.md) |

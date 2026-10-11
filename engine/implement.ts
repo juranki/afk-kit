@@ -31,6 +31,7 @@ import {
 	resolveImplementationSkills,
 	validateEngineConfig,
 } from "./config.ts";
+import type { ConfinementPolicy } from "./confinement-policy.ts";
 import { type CyclePortDeps, createCyclePort } from "./cycle.ts";
 import { createInterruption, driveRun, RUN_DEADLINE_MS } from "./drive.ts";
 import {
@@ -123,6 +124,7 @@ const UNAVAILABLE_BRIEF =
 /** What fact-gathering learned before the Run exists. */
 interface StartFacts {
 	checks: CheckResult[];
+	confinementPolicy?: ConfinementPolicy;
 	/** The tracker's brief substrate, when the ticket was readable. */
 	readinessInput: ReadinessInput | null;
 	/** The freshly fetched origin/main SHA, when resolvable. */
@@ -338,8 +340,10 @@ async function gatherStartFacts(options: {
 	// Confinement capability: the sandbox runtime must initialize.
 	try {
 		const probe = await probeConfinementCapability({
+			repository: cwd,
 			runtime: ports.confinementRuntime,
 		});
+		facts.confinementPolicy = probe.policy;
 		checks.push(
 			probe.ok
 				? pass("confinement", probe.detail)
@@ -458,6 +462,7 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 			const reportArtifact = writeStageReport(handle, "preflight", {
 				checks: facts.checks,
 				baseSha: facts.baseSha,
+				confinementPolicy: facts.confinementPolicy,
 				generatedAt: new Date().toISOString(),
 			});
 			recordEvent(handle, {
@@ -567,6 +572,7 @@ export async function runImplement(options: ImplementOptions): Promise<number> {
 					seams,
 					brief: snapshot,
 					verifyCommands: seams.preparedVerifyCommands,
+					confinementPolicy: facts.confinementPolicy,
 					ports: { ...ports.cycle, interruption },
 				}),
 				runReviews: createReviewPort({

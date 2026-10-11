@@ -29,6 +29,12 @@ no shared-repo surface at all — and the Implementer's commit lands where the
 Engine's observed-fact checks (`rev-list`, `status --porcelain`) and the
 candidate push already look.
 
+**Policy extension:** [ADR 0017](0017-declared-confinement-and-tool-scratch.md)
+extends the original worktree-only write and registry-only network policy with
+isolated task scratch and explicit repository-declared public dependency hosts.
+Independent-clone Git state, pinned identity and the prohibition on shared-repository
+writes remain unchanged.
+
 **Considered options:** allowlisting the linked worktree's shared git admin
 surface (objects, admin directory, branch ref, ref locks and reflogs) —
 rejected: ref creation and reflog trees cannot be narrowed to the one branch
